@@ -1,0 +1,19 @@
+# Architecture
+
+ACL Agent Rooms 1.3.1 remains a no-build WordPress plugin. Its only change from 1.3.0 is guarded installer-layer normalization of Natural room and agent column order; the runtime architecture is unchanged. Canonical room events remain the durable published transcript; ACL Switchboard remains the only server-side provider boundary and owns credentials.
+
+Natural Conversation is an opt-in room runtime layered before Brain runs or Independent jobs. `NaturalConversationDirector` performs local eligibility, explicit targeting, silence, fatigue, responder count, weighted selection, speaking order, purpose, and bounded server-side delay planning. It uses no model request. Existing rooms migrate to `conversation_mode=immediate`, which preserves the 1.2.0 dispatch and delivery path.
+
+`acl_ar_conversation_turns` is the durable unpublished-work boundary. Rows contain only runtime identifiers, safe status/purpose, server due times, an idempotency key, and—only for Brain turns—sanitized content after the entire structured response passes validation. Prompts, raw provider output, credentials, hidden history, and chain-of-thought are never stored there. Ordinary REST projections expose only published events and safe current agent states.
+
+Natural Shared Brain planning creates one run and one request for each selected same-Brain group, then stores the validated `turns` content against pre-created durable turns. Atomic due workers publish one ordinary agent message at a time and complete the Brain only after all turns are published, canceled, or failed. Natural Independent planning creates only selected jobs, links each to one durable turn, and runs the existing Independent runtime when acquired.
+
+The room's `natural_active_trigger_event_id` is the conversation generation marker. A newer eligible human trigger cancels older unpublished turns when configured. Clear Chat, room/agent availability, assignment participation, and the active marker are rechecked before publication. Provider work already in flight may finish, but actual usage is retained and stale content is discarded without retry or transcript insertion.
+
+Shared Brain orchestration adds `acl_ar_brains`, `acl_ar_brain_runs`, agent execution fields, Brain response attribution on messages, and Brain attribution on usage. After normal target selection, agents are deterministically partitioned into Independent targets and groups keyed by Brain. Each Brain group creates one leased, idempotent run and one Switchboard request. A strict parser validates the complete JSON result before a transaction fans responses out as ordinary agent messages. The run, not synthetic agent jobs, drives grouped activity state.
+
+Brain runs never store combined prompts, raw requests, raw provider responses, credentials, authorization headers, or chain-of-thought. Saved data is limited to runtime identifiers, sanitized validated responses, usage totals, safe errors, response event IDs, and operational lease state.
+
+Optional Clear Chat uses four additive fields on `acl_ar_rooms`. `cleared_through_event_id` is the logical boundary; normal transcript, search, context, unread, interaction, and prompt projections exclude cleared transcript events while retaining every underlying record. `RoomClearService` locks one room row, advances the cutoff to the highest existing room event, cancels cleared-trigger work, and creates one idempotent `room_clear` event in one transaction. Runtime pre-dispatch, post-dispatch, and Brain fan-out guards prevent a cleared trigger from creating post-clear transcript replies.
+
+The `room_clear` event is audience-visible synchronization data but not transcript-bearing, searchable, unread-bearing, or audible. Connected clients retain presence, participants, and unrelated composer text while discarding cleared local events and stale history/search/interaction anchors.

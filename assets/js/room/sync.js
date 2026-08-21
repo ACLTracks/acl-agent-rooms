@@ -1,0 +1,21 @@
+(function (root, factory) {
+	'use strict';
+	var Sync = factory();
+	if (typeof module === 'object' && module.exports) { module.exports = Sync; }
+	root.ACLARRoomSync = Sync;
+}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+	'use strict';
+	function Sync(api,store,options){this.api=api;this.store=store;this.options=options||{};this.activeDelay=this.options.activeDelay||3000;this.idleDelay=this.options.idleDelay||6000;this.maxDelay=this.options.maxDelay||24000;this.delay=this.idleDelay;this.pageSize=this.options.pageSize||50;this.polling=false;this.sending=false;this.timer=null;this.controller=null;this.stopped=false;this.document=this.options.document||(typeof document!=='undefined'?document:null);this.navigator=this.options.navigator||(typeof navigator!=='undefined'?navigator:{onLine:true});}
+	Sync.prototype.initial=function(){this.store.syncStatus='loading';return this.api.events({limit:this.pageSize}).then(function(body){if(body.notModified){return [];}this.store.applyClear(body.sync&&body.sync.cleared_through_event_id);if(this.options.onSync){this.options.onSync(body.sync||{});}var added=this.store.initial(body.events||[],body.paging||{});this.store.syncStatus='ready';this.store.clearError();return added;}.bind(this)).catch(function(error){this.store.syncStatus='error';this.store.setError(error.message);throw error;}.bind(this));};
+	Sync.prototype.consume=function(body){this.store.applyClear(body&&body.sync&&body.sync.cleared_through_event_id);if(body&&!body.notModified&&this.options.onSync){this.options.onSync(body.sync||{});}var added=body&&body.notModified?[]:this.store.incremental(body&&body.events||[],body&&body.paging||{});this.delay=added.length?this.activeDelay:Math.min(this.maxDelay,Math.max(this.idleDelay,Math.round(this.delay*1.5)));this.store.clearError();this.store.pollStatus='idle';if(this.options.onEvents){this.options.onEvents(added);}return added;};
+	Sync.prototype.catchUp=function(){if(this.polling){return Promise.resolve([]);}if((this.document&&this.document.hidden)||this.navigator.onLine===false){return Promise.resolve([]);}this.polling=true;this.store.pollStatus='loading';this.controller=typeof AbortController!=='undefined'?new AbortController():null;var signal=this.controller?this.controller.signal:undefined;return this.api.events({limit:this.pageSize,afterCursor:this.store.afterCursor},signal).then(this.consume.bind(this)).catch(function(error){if(error&&error.code==='acl_ar_invalid_cursor'&&this.store.afterCursor){this.store.afterCursor=null;this.store.hasMoreAfter=false;return this.api.events({limit:this.pageSize},signal).then(this.consume.bind(this));}throw error;}.bind(this)).catch(function(error){if(error&&error.name!=='AbortError'){this.store.setError(error.message);if(this.options.onError){this.options.onError(error);}}return [];}.bind(this)).finally(function(){this.polling=false;this.controller=null;}.bind(this));};
+	Sync.prototype.history=function(){if(!this.store.beforeCursor||!this.store.hasMoreBefore){return Promise.resolve([]);}return this.api.events({limit:this.pageSize,beforeCursor:this.store.beforeCursor}).then(function(body){var added=this.store.prepend(body.events||[],body.paging||{});this.store.clearError();return added;}.bind(this)).catch(function(error){this.store.setError(error.message);throw error;}.bind(this));};
+	Sync.prototype.schedule=function(delay){if(this.stopped){return;}clearTimeout(this.timer);this.timer=setTimeout(function(){this.catchUp().finally(function(){this.schedule(this.sending?this.activeDelay:this.delay);}.bind(this));}.bind(this),delay===undefined?this.delay:delay);};
+	Sync.prototype.immediate=function(){this.delay=this.activeDelay;clearTimeout(this.timer);return this.catchUp().finally(function(){this.schedule(this.activeDelay);}.bind(this));};
+	Sync.prototype.setSending=function(value){this.sending=!!value;if(this.sending){this.delay=this.activeDelay;}};
+	Sync.prototype.resetAfterClear=function(cutoff){if(this.controller){this.controller.abort();}this.delay=this.activeDelay;return this.store.applyClear(cutoff);};
+	Sync.prototype.pause=function(){clearTimeout(this.timer);if(this.controller){this.controller.abort();}};
+	Sync.prototype.resume=function(){if(!this.stopped){this.immediate();}};
+	Sync.prototype.stop=function(){this.stopped=true;this.pause();};
+	return Sync;
+}));

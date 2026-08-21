@@ -1,0 +1,36 @@
+# Generated release and packaging outputs.
+/release/
+/build/
+/dist/
+*.zip
+*.tar
+*.tar.gz
+
+# Dependency and test output.
+/vendor/
+/node_modules/
+/coverage/
+.phpunit.result.cache
+
+# Local configuration, runtime data, and logs.
+.env
+.env.*
+!.env.example
+*.log
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+
+# Local test invocation notes contain machine-specific paths.
+/tests/README.md
+
+# Editor and operating-system files.
+/.idea/
+/.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
