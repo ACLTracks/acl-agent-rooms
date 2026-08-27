@@ -14,7 +14,7 @@ class ACL_AR_Release101RegressionTest extends ACL_AR_TestCase {
 		$rooms    = (string) file_get_contents( $root . '/includes/Admin/RoomsPage.php' );
 		$settings = (string) file_get_contents( $root . '/includes/Admin/SettingsPage.php' );
 
-		$this->assert_same( '1.5.0', ACL_AR_VERSION, 'Current plugin version does not preserve the 1.0.1 repair.' );
+		$this->assert_same( '1.5.6', ACL_AR_VERSION, 'Current plugin version does not preserve the 1.0.1 repair.' );
 		$this->assert_same( '1.4.1', ACL_AR_DB_VERSION, 'Current database version does not preserve the 1.0.1 repair.' );
 		\ACL\AgentRooms\Installer::install();
 		$this->assert_same( '1.4.1', (string) get_option( 'acl_ar_db_version' ), 'Installed database version is not current.' );

@@ -188,6 +188,21 @@ class SwitchboardClient implements SwitchboardClientInterface {
 			'metadata'      => is_array( $request['metadata'] ?? null ) ? $request['metadata'] : array(),
 			'preferences'   => array(),
 		);
+		$structured = is_array( $request['structured'] ?? null ) ? $request['structured'] : array();
+		if ( 'json_object' === (string) ( $structured['type'] ?? '' ) ) {
+			$fields = array();
+			foreach ( (array) ( $structured['fields'] ?? array() ) as $field => $type ) {
+				$field = sanitize_key( (string) $field );
+				$type  = sanitize_key( (string) $type );
+				if ( '' !== $field && in_array( $type, array( 'string', 'number', 'boolean', 'array', 'object' ), true ) ) {
+					$fields[ $field ] = $type;
+				}
+			}
+			$switchboard_request['structured'] = array(
+				'type'   => 'json_object',
+				'fields' => $fields,
+			);
+		}
 
 		if ( '' !== $model ) {
 			$switchboard_request['model']                = $model;

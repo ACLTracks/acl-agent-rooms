@@ -98,6 +98,17 @@ class QueueService {
 			return true; }
 		return true === wp_schedule_single_event( time() + 1, self::BRAIN_HOOK, array( $run_id ) );
 	}
+	public function enqueue_brain_retry( int $run_id, int $delay = 30 ): bool {
+		$args = array( $run_id );
+		$due = time() + max( 1, $delay );
+		if ( function_exists( 'as_schedule_single_action' ) ) {
+			return (int) as_schedule_single_action( $due, self::BRAIN_HOOK, $args, 'acl-agent-rooms', false ) > 0;
+		}
+		if ( wp_next_scheduled( self::BRAIN_HOOK, $args ) ) {
+			return true;
+		}
+		return true === wp_schedule_single_event( $due, self::BRAIN_HOOK, $args );
+	}
 	public function run_brain( int $run_id ): void {
 		( new BrainRuntime() )->run( $run_id ); }
 	public function enqueue_turn( ?array $turn ): bool {
@@ -120,6 +131,19 @@ class QueueService {
 		$typing_ok = wp_next_scheduled( self::TYPING_HOOK, array( $id ) ) ? true : true === wp_schedule_single_event( max( time(), $typing ), self::TYPING_HOOK, array( $id ) );
 		$turn_ok   = wp_next_scheduled( self::TURN_HOOK, array( $id ) ) ? true : true === wp_schedule_single_event( $due, self::TURN_HOOK, array( $id ) );
 		return $typing_ok && $turn_ok;
+	}
+	public function reschedule_turn( ?array $turn ): bool {
+		if ( ! $turn || empty( $turn['id'] ) ) {
+			return false;
+		}
+		$args = array( (int) $turn['id'] );
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( self::TYPING_HOOK, $args, 'acl-agent-rooms' );
+			as_unschedule_all_actions( self::TURN_HOOK, $args, 'acl-agent-rooms' );
+		}
+		wp_clear_scheduled_hook( self::TYPING_HOOK, $args );
+		wp_clear_scheduled_hook( self::TURN_HOOK, $args );
+		return $this->enqueue_turn( $turn );
 	}
 	public function run_typing( int $turn_id ): void {
 		( new ConversationTurnService() )->mark_typing( $turn_id ); }

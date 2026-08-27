@@ -162,11 +162,16 @@ class EventProjectionService {
 				'auto_muted'          => ! empty( $m['auto_muted'] ),
 			);
 		}if ( 'brain_run' === $type ) {
-			return array(
+			$out = array(
 				'status'         => sanitize_key( (string) ( $m['status'] ?? '' ) ),
 				'agent_ids'      => array_values( array_unique( array_filter( array_map( 'absint', (array) ( $m['agent_ids'] ?? array() ) ) ) ) ),
 				'response_count' => absint( $m['response_count'] ?? 0 ),
 			);
+			if ( 'failed' === $out['status'] ) {
+				$out['retryable'] = ! empty( $m['retryable'] );
+				$out['error']     = PublicError::message( (string) ( $m['error'] ?? '' ), __( 'Shared Brain reply failed.', 'acl-agent-rooms' ) );
+			}
+			return $out;
 		}if ( isset( $m['status'] ) ) {
 			$out['status'] = sanitize_key( (string) $m['status'] );
 		}if ( isset( $m['retryable'] ) ) {
@@ -190,7 +195,7 @@ class EventProjectionService {
 			$out = array( 'result' => $m['result'] );
 		}return $out;}
 	private function diagnostics( array $m ): array {
-		$allowed = array( 'status', 'provider_route', 'model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'finish_reason', 'attempts', 'retryable', 'response_message_id', 'error' );
+		$allowed = array( 'status', 'stage', 'error_code', 'result_status', 'provider_route', 'model', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'finish_reason', 'attempts', 'retryable', 'response_message_id', 'error' );
 		$out     = array();
 		foreach ( $allowed as $k ) {
 			if ( ! array_key_exists( $k, $m ) || is_array( $m[ $k ] ) || is_object( $m[ $k ] ) ) {

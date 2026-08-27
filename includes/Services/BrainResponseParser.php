@@ -25,7 +25,11 @@ class BrainResponseParser {
 				return $this->error( 'acl_ar_brain_response_invalid', __( 'The Shared Brain response fields were invalid.', 'acl-agent-rooms' ) );
 			}$id = $item['agent_id'];
 			if ( ! in_array( $id, $expected, true ) ) {
-				return $this->error( 'acl_ar_brain_response_unknown_agent', __( 'The Shared Brain returned an unknown agent.', 'acl-agent-rooms' ) );
+				// Providers occasionally include an otherwise valid response for an
+				// unrequested room participant. Discard it rather than publishing it
+				// or rejecting a complete set of requested responses. If it replaced
+				// a requested response, the completeness check below still fails.
+				continue;
 			}if ( isset( $found[ $id ] ) ) {
 				return $this->error( 'acl_ar_brain_response_duplicate_agent', __( 'The Shared Brain returned an agent more than once.', 'acl-agent-rooms' ) );
 			}$content = trim( str_replace( array( "\r\n", "\r" ), "\n", $item['content'] ) );

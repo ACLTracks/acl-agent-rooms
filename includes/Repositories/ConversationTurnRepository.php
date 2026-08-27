@@ -70,6 +70,10 @@ class ConversationTurnRepository {
 		global $wpdb;
 		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . $this->table() . ' WHERE brain_run_id=%d ORDER BY due_at,id', $run_id ), ARRAY_A );
 		return array_map( array( ConversationTurn::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
+	public function lock_for_brain_run( int $run_id ): array {
+		global $wpdb;
+		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . $this->table() . ' WHERE brain_run_id=%d ORDER BY due_at,id FOR UPDATE', $run_id ), ARRAY_A );
+		return array_map( array( ConversationTurn::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
 	public function for_trigger( int $trigger_event_id ): array {
 		global $wpdb;
 		$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . $this->table() . ' WHERE trigger_event_id=%d ORDER BY due_at,id', $trigger_event_id ), ARRAY_A );
@@ -93,6 +97,21 @@ class ConversationTurnRepository {
 		$now  = Time::mysql_gmt();
 		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE status='pending' AND typing_at IS NOT NULL AND typing_at<=%s AND due_at>%s ORDER BY typing_at,id LIMIT %d", $now, $now, max( 1, min( 50, $limit ) ) ), ARRAY_A );
 		return array_map( array( ConversationTurn::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
+	public function due_for_room( int $room_id, int $limit = 10 ): array {
+		global $wpdb;
+		$now   = Time::mysql_gmt();
+		$stale = gmdate( 'Y-m-d H:i:s', time() - 180 );
+		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE room_id=%d AND ((status IN ('pending','typing') AND due_at<=%s) OR (status='publishing' AND updated_at<=%s)) ORDER BY due_at,id LIMIT %d", $room_id, $now, $stale, max( 1, min( 50, $limit ) ) ), ARRAY_A );
+		return array_map( array( ConversationTurn::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
+	public function typing_due_for_room( int $room_id, int $limit = 20 ): array {
+		global $wpdb;
+		$now  = Time::mysql_gmt();
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE room_id=%d AND status='pending' AND typing_at IS NOT NULL AND typing_at<=%s AND due_at>%s ORDER BY typing_at,id LIMIT %d", $room_id, $now, $now, max( 1, min( 50, $limit ) ) ), ARRAY_A );
+		return array_map( array( ConversationTurn::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
+	public function next_work_at( int $room_id ): ?string {
+		global $wpdb;
+		$value = $wpdb->get_var( $wpdb->prepare( "SELECT MIN(CASE WHEN status='pending' AND typing_at IS NOT NULL THEN LEAST(typing_at,due_at) ELSE due_at END) FROM {$this->table()} WHERE room_id=%d AND status IN ('pending','typing','publishing')", $room_id ) );
+		return is_string( $value ) && '' !== $value ? $value : null; }
 
 	public function mark_typing( int $id ): bool {
 		global $wpdb;
@@ -137,6 +156,50 @@ class ConversationTurnRepository {
 			} $wpdb->query( $wpdb->prepare( "UPDATE {$this->table()} SET content=%s,purpose=%s,updated_at=%s WHERE id=%d AND status IN ('pending','typing')", $content, $purpose, Time::mysql_gmt(), (int) $by_agent[ $id ]['id'] ) );
 			if ( $wpdb->rows_affected < 1 ) {
 				return false; }
+		}
+		return true;
+	}
+	public function rebase_brain_schedule( int $run_id, array $locked, array $scheduled ): bool {
+		global $wpdb;
+		if ( count( $locked ) !== count( $scheduled ) ) {
+			return false;
+		}
+		$by_agent = array();
+		foreach ( $scheduled as $item ) {
+			$agent_id = absint( $item['agent']['id'] ?? 0 );
+			$due_at   = (string) ( $item['due_at'] ?? '' );
+			$typing_at = (string) ( $item['typing_at'] ?? '' );
+			if ( ! $agent_id || '' === $due_at || '' === $typing_at || isset( $by_agent[ $agent_id ] ) ) {
+				return false;
+			}
+			$by_agent[ $agent_id ] = array(
+				'due_at'    => $due_at,
+				'typing_at' => $typing_at,
+			);
+		}
+		foreach ( $locked as $turn ) {
+			$agent_id = (int) ( $turn['agent_id'] ?? 0 );
+			if ( ! isset( $by_agent[ $agent_id ] ) || ! in_array( (string) ( $turn['status'] ?? '' ), array( 'pending', 'typing' ), true ) ) {
+				return false;
+			}
+			$updated = $wpdb->update(
+				$this->table(),
+				array(
+					'status'     => 'pending',
+					'due_at'     => $by_agent[ $agent_id ]['due_at'],
+					'typing_at'  => $by_agent[ $agent_id ]['typing_at'],
+					'updated_at' => Time::mysql_gmt(),
+				),
+				array(
+					'id'           => (int) $turn['id'],
+					'brain_run_id' => $run_id,
+				),
+				array( '%s', '%s', '%s', '%s' ),
+				array( '%d', '%d' )
+			);
+			if ( false === $updated ) {
+				return false;
+			}
 		}
 		return true;
 	}

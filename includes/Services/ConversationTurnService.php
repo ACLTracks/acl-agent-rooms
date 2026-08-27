@@ -146,6 +146,32 @@ class ConversationTurnService {
 			'scanned' => $scanned,
 			'changed' => $changed,
 		); }
+	public function run_due_for_room( int $room_id, int $limit = 20 ): array {
+		$scanned = 0;
+		$changed = 0;
+		foreach ( $this->turns->typing_due_for_room( $room_id, $limit ) as $turn ) {
+			++$scanned;
+			$before = (string) $turn['status'];
+			$this->mark_typing( (int) $turn['id'] );
+			$after = $this->turns->find( (int) $turn['id'] );
+			if ( $after && $before !== (string) $after['status'] ) {
+				++$changed;
+			}
+		}
+		foreach ( $this->turns->due_for_room( $room_id, $limit ) as $turn ) {
+			++$scanned;
+			$before = (string) $turn['status'];
+			$this->publish( (int) $turn['id'] );
+			$after = $this->turns->find( (int) $turn['id'] );
+			if ( $after && $before !== (string) $after['status'] ) {
+				++$changed;
+			}
+		}
+		return array(
+			'scanned' => $scanned,
+			'changed' => $changed,
+		);
+	}
 	public function recover( int $limit = 100 ): array {
 		$result = $this->run_due( min( 50, $limit ) );
 		foreach ( $this->turns->active( $limit ) as $turn ) {
@@ -175,8 +201,10 @@ class ConversationTurnService {
 	private function publish_brain( array $turn ) {
 		if ( null === $turn['content'] || '' === trim( (string) $turn['content'] ) ) {
 			$run = $this->runs->find( (int) $turn['brain_run_id'] );
-			if ( $run && in_array( $run['status'], array( 'pending', 'running' ), true ) ) {
-				$this->turns->postpone( (int) $turn['id'], 2 );
+			$waiting_for_brain = $run && ( in_array( $run['status'], array( 'pending', 'running' ), true ) || ( 'failed' === $run['status'] && ! empty( $run['next_attempt_at'] ) ) );
+			if ( $waiting_for_brain ) {
+				$delay = 'failed' === $run['status'] ? max( 2, min( 30, (int) strtotime( (string) $run['next_attempt_at'] . ' UTC' ) - time() ) ) : 2;
+				$this->turns->postpone( (int) $turn['id'], $delay );
 				( new QueueService() )->enqueue_turn( $this->turns->find( (int) $turn['id'] ) );
 				return $turn;
 			} $this->turns->fail( (int) $turn['id'], 'content_unavailable' );

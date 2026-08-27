@@ -8,11 +8,13 @@
 namespace ACL\AgentRooms\Rest;
 
 use ACL\AgentRooms\Repositories\AgentRepository;
+use ACL\AgentRooms\Repositories\BrainRunRepository;
 use ACL\AgentRooms\Repositories\JobRepository;
 use ACL\AgentRooms\Repositories\MessageRepository;
 use ACL\AgentRooms\Repositories\RoomRepository;
 use ACL\AgentRooms\Services\AccessService;
 use ACL\AgentRooms\Services\AgentRuntime;
+use ACL\AgentRooms\Services\BrainRuntime;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -44,6 +46,8 @@ class RestServiceProvider {
 			( new ModerationController( $access ) )->register_routes();
 		}
 		( new JobsController( $jobs, $access, $runtime ) )->register_routes();
+		$brain_runs = new BrainRunRepository();
+		( new RoomWorkController( $rooms, $access, $brain_runs, $jobs, new BrainRuntime( $brain_runs ), $runtime ) )->register_routes();
 		( new SettingsController() )->register_routes();
 		( new PresenceController( $rooms, $access ) )->register_routes();
 		( new HealthController() )->register_routes();

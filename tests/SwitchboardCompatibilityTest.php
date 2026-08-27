@@ -7,6 +7,7 @@ class ACL_AR_SwitchboardCompatibilityTest extends ACL_AR_TestCase {
 	public function run(): void {
 		$this->default_sentinels_are_omitted();
 		$this->explicit_selections_are_preserved();
+		$this->structured_output_is_forwarded();
 	}
 
 	private function default_sentinels_are_omitted(): void {
@@ -45,6 +46,20 @@ class ACL_AR_SwitchboardCompatibilityTest extends ACL_AR_TestCase {
 		$this->assert_same( 'openrouter', $prepared['preferences']['provider'], 'Explicit provider preference changed.' );
 		$this->assert_same( 'openrouter/free', $prepared['preferences']['model'], 'Explicit model preference changed.' );
 		$this->assert_same( 'function', $prepared['payload']['tools'][0]['type'], 'Tool payload changed.' );
+	}
+
+	private function structured_output_is_forwarded(): void {
+		$prepared = $this->prepare(
+			array(
+				'messages'   => array( array( 'role' => 'user', 'content' => 'Return JSON' ) ),
+				'structured' => array(
+					'type'   => 'json_object',
+					'fields' => array( 'responses' => 'array' ),
+				),
+			)
+		);
+
+		$this->assert_same( array( 'type' => 'json_object', 'fields' => array( 'responses' => 'array' ) ), $prepared['structured'] ?? array(), 'Structured output configuration did not reach Switchboard.' );
 	}
 
 	private function prepare( array $request ): array {

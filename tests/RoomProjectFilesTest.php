@@ -26,7 +26,7 @@ class ACL_AR_RoomProjectFilesTest extends ACL_AR_TestCase {
 	private $move_filter;
 
 	public function run(): void {
-		$this->assert_same( '1.5.0', ACL_AR_VERSION, 'Room Project Files plugin version mismatch.' );
+		$this->assert_same( '1.5.6', ACL_AR_VERSION, 'Room Project Files plugin version mismatch.' );
 		$this->assert_same( '1.4.1', ACL_AR_DB_VERSION, 'Room Project Files database version mismatch.' );
 		$this->assert_same( '0.6.0', defined( 'ACL_STORAGE_VERSION' ) ? ACL_STORAGE_VERSION : '', 'Compatible ACL Storage is not active.' );
 		$this->assert_true( ( new StorageBridge() )->available(), 'The versioned ACL Storage contract is unavailable.' );

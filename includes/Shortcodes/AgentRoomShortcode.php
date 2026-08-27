@@ -69,6 +69,7 @@ class AgentRoomShortcode {
 				'visibility'            => (string) $room['visibility'],
 				'status'                => (string) $room['status'],
 				'replyMode'             => (string) $room['agent_reply_mode'],
+				'conversationMode'      => (string) $room['conversation_mode'],
 				'allowChatClear'        => ! empty( $room['allow_chat_clear'] ),
 				'roomFilesEnabled'      => ! empty( $room['room_files_enabled'] ),
 				'fileContextMode'       => (string) $room['file_context_mode'],

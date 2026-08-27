@@ -1,5 +1,5 @@
 <?php
-/** Deterministic no-cost coverage for the 1.4.1 human-message response path. */
+/** Deterministic no-cost coverage for the 1.5.6 human-message response path. */
 
 class ACL_AR_ResponsivenessFakeSwitchboard implements \ACL\AgentRooms\Contracts\SwitchboardClientInterface {
 	public int $calls = 0;
@@ -47,12 +47,37 @@ class ACL_AR_MessageResponsivenessTest extends ACL_AR_TestCase {
 		wp_set_current_user( $this->owner );
 		try {
 			$this->independent_endpoint_and_commit();
+			$this->ask_command_exposes_foreground_work();
 			$this->provider_failure_preserves_message();
 			$this->shared_brain_endpoint_and_one_call();
 			$this->no_agent_natural_silence_and_idempotency();
 			$this->post_persistence_dispatch_failure();
 			$this->project_file_request_boundary();
 		} finally { $this->cleanup(); }
+	}
+
+	private function ask_command_exposes_foreground_work(): void {
+		$agent_id = $this->make_agent( 'Ask Independent' );
+		$agent = ( new \ACL\AgentRooms\Repositories\AgentRepository() )->find( $agent_id );
+		$room_id = $this->make_room( 'Ask Independent Room', array(), array( $agent_id ) );
+		$request = new \WP_REST_Request( 'POST', '/acl-agent-rooms/v1/rooms/' . $room_id . '/commands' );
+		$request->set_param( 'id', $room_id );
+		$request->set_param( 'input', '/ask ' . $agent['slug'] . ' Controlled foreground command' );
+		$request->set_param( 'client_request_id', $this->prefix . '-ask-independent' );
+		$calls = $this->fake->calls;
+		$response = ( new \ACL\AgentRooms\Rest\CommandsController( null, $this->controller() ) )->execute( $request );
+		$this->assert_true( $response instanceof \WP_REST_Response && 200 === $response->get_status(), '/ask command did not return a successful response.' );
+		$data = $response->get_data();
+		$this->assert_same( 1, count( $data['jobs'] ?? array() ), '/ask command did not expose its job to the foreground worker.' );
+		$this->assert_same( 0, count( $data['brain_runs'] ?? array() ), 'Independent /ask command exposed unexpected Shared Brain work.' );
+		$this->assert_same( $data['jobs'], $data['result']['jobs'], '/ask command returned inconsistent job lists.' );
+		$this->assert_same( $calls, $this->fake->calls, '/ask command ran its provider before the foreground worker.' );
+		$job_id = (int) $data['jobs'][0]['id'];
+		$this->job_ids[] = $job_id;
+		$work = $this->work_controller()->run( $this->work_request( $room_id, array(), array( $job_id ) ) );
+		$this->assert_true( $work instanceof \WP_REST_Response && 200 === $work->get_status(), 'Foreground worker did not accept the /ask job.' );
+		$this->assert_same( false, (bool) $work->get_data()['pending'], 'Foreground worker left the /ask job pending.' );
+		$this->assert_same( $calls + 1, $this->fake->calls, 'Foreground /ask job did not use exactly one provider request.' );
 	}
 
 	public function allow_fake_brain( $allowed, string $provider, string $model ): ?bool {
@@ -65,6 +90,30 @@ class ACL_AR_MessageResponsivenessTest extends ACL_AR_TestCase {
 		$messages = new \ACL\AgentRooms\Repositories\MessageRepository();
 		$jobs = new \ACL\AgentRooms\Repositories\JobRepository();
 		return new \ACL\AgentRooms\Rest\MessagesController( $rooms, $agents, $messages, $jobs, new \ACL\AgentRooms\Services\AccessService( $rooms ), new \ACL\AgentRooms\Services\AgentRuntime( $jobs, $rooms, $agents, $messages, null, $this->fake ) );
+	}
+
+	private function work_controller(): \ACL\AgentRooms\Rest\RoomWorkController {
+		$rooms = new \ACL\AgentRooms\Repositories\RoomRepository();
+		$agents = new \ACL\AgentRooms\Repositories\AgentRepository();
+		$messages = new \ACL\AgentRooms\Repositories\MessageRepository();
+		$jobs = new \ACL\AgentRooms\Repositories\JobRepository();
+		$runs = new \ACL\AgentRooms\Repositories\BrainRunRepository();
+		return new \ACL\AgentRooms\Rest\RoomWorkController(
+			$rooms,
+			new \ACL\AgentRooms\Services\AccessService( $rooms ),
+			$runs,
+			$jobs,
+			new \ACL\AgentRooms\Services\BrainRuntime( $runs ),
+			new \ACL\AgentRooms\Services\AgentRuntime( $jobs, $rooms, $agents, $messages, null, $this->fake )
+		);
+	}
+
+	private function work_request( int $room_id, array $brain_run_ids = array(), array $job_ids = array() ): \WP_REST_Request {
+		$request = new \WP_REST_Request( 'POST', '/acl-agent-rooms/v1/rooms/' . $room_id . '/work' );
+		$request->set_param( 'id', $room_id );
+		$request->set_param( 'brain_run_ids', $brain_run_ids );
+		$request->set_param( 'job_ids', $job_ids );
+		return $request;
 	}
 
 	private function request( int $room_id, string $content, string $nonce ): \WP_REST_Request {
@@ -111,7 +160,10 @@ class ACL_AR_MessageResponsivenessTest extends ACL_AR_TestCase {
 		$this->assert_same( 'queued', $data['orchestration']['status'], 'Independent response did not report safe queued status.' );
 		$this->assert_same( 1, count( $data['jobs'] ), 'Independent message did not create exactly one job.' );
 		$job_id = (int) $data['jobs'][0]['id']; $this->job_ids[] = $job_id;
-		$this->fake->delay_ms = 5; ( new \ACL\AgentRooms\Services\AgentRuntime() )->run_job( $job_id );
+		$this->fake->delay_ms = 5;
+		$work = $this->work_controller()->run( $this->work_request( $room, array(), array( $job_id ) ) );
+		$this->assert_true( $work instanceof \WP_REST_Response && 200 === $work->get_status(), 'Foreground worker did not return a successful Independent response.' );
+		$this->assert_same( false, (bool) $work->get_data()['pending'], 'Foreground worker left completed Independent work pending.' );
 		$this->assert_same( $before_calls + 1, $this->fake->calls, 'Queued Independent job did not make exactly one provider request.' );
 		$job = ( new \ACL\AgentRooms\Repositories\JobRepository() )->find( $job_id );
 		$this->assert_same( 'completed', $job['status'], 'Queued Independent job did not complete.' );
@@ -143,7 +195,10 @@ class ACL_AR_MessageResponsivenessTest extends ACL_AR_TestCase {
 		$this->assert_same( $calls, $this->fake->calls, 'Shared Brain ran inside the human message endpoint.' );
 		$this->assert_same( 1, count( $data['brain_runs'] ), 'Shared Brain message did not enqueue one grouped run.' );
 		$run_id = (int) $data['brain_runs'][0]['id']; $this->run_ids[] = $run_id;
-		$this->fake->delay_ms = 5; ( new \ACL\AgentRooms\Services\BrainRuntime() )->run( $run_id );
+		$this->fake->delay_ms = 5;
+		$work = $this->work_controller()->run( $this->work_request( $room, array( $run_id ) ) );
+		$this->assert_true( $work instanceof \WP_REST_Response && 200 === $work->get_status(), 'Foreground worker did not return a successful Shared Brain response.' );
+		$this->assert_same( false, (bool) $work->get_data()['pending'], 'Foreground worker left completed Shared Brain work pending.' );
 		$this->assert_same( $calls + 1, $this->fake->calls, 'Shared Brain did not use exactly one queued provider request.' );
 		$this->assert_same( 2, count( ( new \ACL\AgentRooms\Repositories\BrainRunRepository() )->find( $run_id )['response_event_ids'] ), 'Shared Brain did not fan out both replies.' );
 		$this->assert_true( null !== ( new \ACL\AgentRooms\Repositories\MessageRepository() )->find( (int) $data['message_id'] ), 'Shared Brain execution removed the human message.' );

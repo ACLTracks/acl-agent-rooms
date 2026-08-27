@@ -3,7 +3,7 @@ Contributors: acl
 Tags: artificial intelligence, chat, collaboration, agents, automation
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.5.0
+Stable tag: 1.5.6
 Requires PHP: 8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -89,6 +89,45 @@ User-generated data is preserved by default. Destructive uninstall requires an e
 
 == Changelog ==
 
+= 1.5.6 =
+
+* Rebased Shared Brain Natural Conversation timing after validated provider output is saved, preserving the configured response-ready speaker cadence even when the provider is slow.
+* Replaced stale pre-response turn schedules while retaining exact-once publication and durable recovery.
+* Preserved the 1.4.1 database schema and ACL Switchboard 1.5.2.
+
+= 1.5.5 =
+
+* Extended foreground execution to `/ask` and manual replies, including scheduled Natural Conversation work.
+* Prevented historical terminal failures from appearing as current errors during initial room loading.
+* Preserved exact-once execution, the 1.4.1 database schema, and ACL Switchboard 1.5.2.
+
+= 1.5.4 =
+
+* Added a nonce-protected, room-scoped foreground worker so live Immediate conversations start without waiting for delayed WordPress cron.
+* Advanced due Natural Conversation turns through the same bounded worker while retaining the durable queue as recovery.
+* Preserved exact-once execution, strict Shared Brain validation, the 1.4.1 database schema, and ACL Switchboard 1.5.2.
+
+= 1.5.3 =
+
+* Discarded unrequested extra-agent output without ever publishing it when all requested Shared Brain responses are complete and valid.
+* Added bounded, guided retries for correctable response-contract failures in Immediate and Natural Conversation modes.
+* Preserved strict identity, completeness, content, ordering, and exactly-once publication guarantees.
+* Preserved the 1.4.1 database schema and left ACL Switchboard unchanged at 1.5.2.
+
+= 1.5.2 =
+
+* Kept Natural Conversation turns recoverable while a retryable Shared Brain request is waiting to run again.
+* Saved validated Brain responses and scheduled turn content atomically to prevent partial worker-visible state.
+* Added deterministic recovery coverage for a provider HTTP 429 followed by a successful retry.
+* Preserved the 1.4.1 database schema and left ACL Switchboard unchanged at 1.5.2.
+
+= 1.5.1 =
+
+* Improved Shared Brain reliability with structured output and bounded recovery for incomplete grouped responses.
+* Preserved all-or-nothing assistant publication and existing duplicate-dispatch protections.
+* Added sanitized participant-visible failure feedback and manager-only diagnostics.
+* Preserved the 1.4.1 database schema and left ACL Switchboard unchanged.
+
 = 1.5.0 =
 
 * Added a documented extension API for separately distributed add-ons.
@@ -103,6 +142,30 @@ User-generated data is preserved by default. Destructive uninstall requires an e
 * Preserved same-request idempotency for ambiguous retry paths.
 
 == Upgrade Notice ==
+
+= 1.5.6 =
+
+No database migration is required. Existing data is preserved; slow Shared Brain responses no longer collapse configured Natural Conversation speaker delays.
+
+= 1.5.5 =
+
+No database migration is required. Existing data is preserved; explicit `/ask` and manual reply paths now use the same foreground execution and recovery behavior as ordinary live messages.
+
+= 1.5.4 =
+
+No database migration is required. Existing data is preserved; live rooms now start authorized agent work immediately instead of waiting for periodic cron service.
+
+= 1.5.3 =
+
+No database migration is required. Existing data is preserved; this patch makes Shared Brain response-contract recovery reliable in both Immediate and Natural Conversation modes.
+
+= 1.5.2 =
+
+No database migration is required. Existing room and agent data is preserved; this patch prevents retryable Shared Brain failures from terminally failing scheduled Natural Conversation turns.
+
+= 1.5.1 =
+
+No database migration is required. Existing room and agent data is preserved; this patch improves Shared Brain response recovery and failure visibility.
 
 = 1.5.0 =
 

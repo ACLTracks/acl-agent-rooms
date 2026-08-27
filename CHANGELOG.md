@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.5.6 - 2026-08-27
+
+- Rebased Shared Brain Natural Conversation timing after validated provider output is persisted, so provider latency cannot consume the configured publication cadence.
+- Replaced stale pre-response turn schedules with response-ready typing and publication schedules while retaining the recurring worker as durable recovery.
+- Added deterministic regression coverage for an expired pre-response schedule, future response-ready due times, unique ordered turns, and corrected WordPress cron timestamps.
+- Preserved exact-once publication, the 1.4.1 database schema, and unchanged ACL Switchboard 1.5.2.
+
+## 1.5.5 - 2026-08-27
+
+- Exposed `/ask` job and Shared Brain run IDs to the live room so explicitly addressed agents use the foreground worker instead of waiting for periodic cron.
+- Started the same foreground worker after manual replies, including scheduled Natural Conversation turns.
+- Prevented historical terminal failure events from being re-announced as current errors when a room first loads.
+- Preserved the exact-once worker, the 1.4.1 database schema, and unchanged ACL Switchboard 1.5.2.
+
+## 1.5.4 - 2026-08-27
+
+- Added a nonce-protected, room-scoped foreground worker so live Immediate conversations do not wait for a delayed WordPress cron runner.
+- Used the same bounded worker to advance due Natural Conversation turns while the room is open, with the durable queue retained as recovery.
+- Kept worker requests restricted to authorized room participants and to explicitly returned job and Shared Brain run IDs.
+- Preserved exact-once claims, bounded Shared Brain contract retries, the 1.4.1 database schema, and ACL Switchboard 1.5.2.
+
+## 1.5.3 - 2026-08-27
+
+- Discarded unrequested extra-agent output without publishing it when every requested Shared Brain response is present and valid.
+- Added bounded, guided retry recovery for every correctable Shared Brain response-contract failure in Immediate and Natural Conversation modes.
+- Preserved strict agent identity, required-agent completeness, content, ordering, and all-or-nothing publication checks.
+- Added deterministic regression coverage for the production unknown-agent failure and Natural Conversation recovery without stale turns or duplicate messages.
+- Preserved the 1.4.1 database schema and left ACL Switchboard unchanged at 1.5.2.
+
+## 1.5.2 - 2026-08-27
+
+- Kept due Natural Conversation turns pending while a retryable Shared Brain provider failure still has a scheduled retry.
+- Persisted validated Shared Brain responses and their Natural Conversation turn content in one database transaction.
+- Added deterministic regression coverage for a retryable HTTP 429 followed by successful recovery without losing the scheduled assistant turns.
+- Preserved the 1.4.1 database schema and left ACL Switchboard unchanged at 1.5.2.
+
+## 1.5.1 - 2026-08-27
+
+- Required structured JSON output for Shared Brain responses and forwarded the sanitized contract through ACL Switchboard.
+- Added bounded Brain-worker recovery when a provider response omits a required agent while preserving all-or-nothing publication and existing idempotency.
+- Added sanitized failure-stage diagnostics for managers and room-visible asynchronous failure feedback for authorized participants.
+- Surfaced degraded dispatch and terminal agent or Shared Brain failures in the room UI without allowing connection status updates to erase actionable errors.
+- Added deterministic no-cost regression coverage for incomplete-output recovery, queue execution, exactly-once publication, request counts, and frontend error rendering.
+- Preserved the 1.4.1 database schema and left ACL Switchboard unchanged.
+
 ## 1.5.0 - 2026-08-20
 
 - Added a narrow, documented, versioned extension API for separately distributed add-ons.

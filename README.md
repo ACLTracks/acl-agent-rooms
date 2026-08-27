@@ -4,7 +4,7 @@ ACL Agent Rooms is the complete Free WordPress plugin for room-based conversatio
 
 ## Version
 
-- Plugin version: `1.5.0`
+- Plugin version: `1.5.6`
 - Database schema version: `ACL_AR_DB_VERSION` is `1.4.1`
 - Extension API version: `1`
 
@@ -15,6 +15,18 @@ Durable event contracts: `moderation` and `message_delete`. Health and maintenan
 Version 1.4.1 makes accepted human messages visible immediately. The browser renders a restrained optimistic row keyed by the existing client request ID, while the server atomically commits the message, canonical event, and sender read boundary before scheduling any provider-bearing work. Independent jobs, Shared Brain runs, Natural Conversation turns, prompt construction, project-file retrieval, and ACL Switchboard calls run after that commit. The canonical event reconciles the optimistic row whether the POST response or polling arrives first; ambiguous failures retain a safe same-nonce retry without creating duplicate messages or events.
 
 Version 1.5.0 introduces the documented Free/Pro extension boundary without moving or locking any existing feature. The optional ACL Agent Rooms Pro add-on uses the public extension API to provide advanced operational reporting. Free keeps the complete room experience, every core runtime, all 21 existing data tables, the only queue/maintenance workers, and all security, privacy, moderation, accessibility, and recovery behavior. The database schema remains 1.4.1 because this release changes no table or column.
+
+Version 1.5.1 makes Shared Brain replies more reliable when a provider omits a required agent response. Shared Brain requests now use ACL Switchboard's structured-output contract, incomplete grouped responses remain unpublished and receive a bounded queued retry, and terminal failures expose sanitized room-visible feedback without leaking manager diagnostics. The database schema remains 1.4.1 and ACL Switchboard remains a separate, unchanged dependency.
+
+Version 1.5.2 keeps Natural Conversation turns recoverable while a Shared Brain provider retry is pending. It also saves validated Brain responses and their scheduled turn content in one transaction, so a turn worker cannot observe a partially persisted response. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
+
+Version 1.5.3 keeps strict Shared Brain identity and content validation while safely discarding unrequested extra-agent output, retrying every correctable provider response-contract failure with bounded correction guidance, and preserving pending Natural Conversation turns until a corrected response is accepted. Immediate and Natural modes retain all-or-nothing, exactly-once publication. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
+
+Version 1.5.4 adds a nonce-protected, room-scoped foreground worker used by the live room after a message is committed. Immediate agent and Shared Brain work starts without waiting for the server's periodic WordPress cron runner, while Natural Conversation reuses the same bounded worker to publish each due turn. The durable queue remains the recovery path. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
+
+Version 1.5.5 extends that foreground path to `/ask` and manual replies, including scheduled Natural Conversation work. Historical terminal failures are no longer re-announced as current errors during the initial room load. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
+
+Version 1.5.6 rebases Shared Brain Natural Conversation publication times after the validated provider response is safely persisted. Slow providers can no longer consume the configured first-response and inter-speaker delays and collapse multiple replies into the same publication instant. Supersession, exact-once publication, foreground work, and durable queue recovery remain unchanged. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
 
 ## Free and Pro architecture
 

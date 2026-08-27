@@ -94,7 +94,11 @@ function run() {
 
 	const root = path.resolve(__dirname, '../..');
 	const roomSource = fs.readFileSync(path.join(root, 'assets/js/room.js'), 'utf8');
+	const statusSource = fs.readFileSync(path.join(root, 'assets/js/room/status-bar.js'), 'utf8');
+	const apiSource = fs.readFileSync(path.join(root, 'assets/js/room/api.js'), 'utf8');
 	const controllerSource = fs.readFileSync(path.join(root, 'includes/Rest/MessagesController.php'), 'utf8');
+	const roomWorkSource = fs.readFileSync(path.join(root, 'includes/Rest/RoomWorkController.php'), 'utf8');
+	const commandsSource = fs.readFileSync(path.join(root, 'includes/Rest/CommandsController.php'), 'utf8');
 	const createPath = controllerSource.slice(controllerSource.indexOf('public function create'), controllerSource.indexOf('public function manual_reply('));
 	const compactCreatePath = createPath.replace(/\s+/g, '');
 	ok(roomSource.indexOf('store.addOptimistic') < roomSource.indexOf('api.send(content'), 'Frontend sends before optimistic rendering.');
@@ -104,6 +108,16 @@ function run() {
 	ok(!createPath.includes('run_job(') && !createPath.includes('->run('), 'Human-message endpoint still executes a provider-bearing runtime inline.');
 	ok(createPath.includes('HumanMessageService') && createPath.indexOf('persist(') < createPath.indexOf('dispatch_after_persistence'), 'Dispatch does not follow committed human persistence.');
 	ok(compactCreatePath.includes("'event'=>") && compactCreatePath.includes("'orchestration'=>"), 'Human-message response omits its canonical event or safe queue status.');
+	ok(roomSource.includes("e.type==='agent_failed'") && roomSource.includes("e.type==='brain_run'"), 'Asynchronous agent or Shared Brain failures are not surfaced in the room UI.');
+	ok(roomSource.includes("body.orchestration.status==='degraded'") && roomSource.includes('agent reply could not be queued'), 'A post-persistence queue failure still appears as silent success.');
+	ok(roomSource.includes('delete stateNode.dataset.statusSource') && statusSource.includes("statusSource='connection'"), 'Connection recovery can erase an actionable asynchronous failure.');
+	ok(apiSource.includes('Api.prototype.work') && apiSource.includes("'/rooms/' + encodeURIComponent(this.config.roomId) + '/work'"), 'The live room API cannot start its room-scoped worker.');
+	ok(roomSource.includes('kickRoomWork(body)') && roomSource.includes("config.room.conversationMode==='natural'"), 'Accepted messages do not start bounded Immediate and Natural foreground work.');
+	ok(roomSource.includes('if(body&&body.job)') && roomSource.includes('api.reply(agentId).then(function(body){kickRoomWork(body)'), 'Manual Independent and Natural replies do not enter foreground work.');
+	ok(commandsSource.includes("'brain_runs'") && commandsSource.includes("'scheduled_turn_count'"), '/ask responses do not expose their Shared Brain or scheduled-turn work.');
+	ok(roomSource.includes("if(!isInitial&&e.type==='agent_failed'") && roomSource.includes("if(!isInitial&&e.type==='brain_run'"), 'Historical failures are re-announced as current room errors on reload.');
+	ok(roomWorkSource.includes("'/rooms/(?P<id>[\\d]+)/work'") && roomWorkSource.includes('verify_nonce') && roomWorkSource.includes('can_access_room'), 'The room work endpoint is missing its route, nonce, or room-access gate.');
+	ok(roomWorkSource.includes("count( $brain_run_ids ) > 5") && roomWorkSource.includes("count( $job_ids ) > 5"), 'The foreground worker does not enforce bounded work lists.');
 
 	console.log('PASS message_responsiveness_js assertions=' + assertions);
 }
