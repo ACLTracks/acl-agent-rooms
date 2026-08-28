@@ -46,7 +46,7 @@ class ACL_AR_Release131SchemaNormalizationTest extends ACL_AR_TestCase {
 		add_action( 'acl_ar_installer_schema_normalized', $this->move_hook );
 		add_action( 'acl_ar_installer_schema_normalization_failed', $this->failure_hook, 10, 2 );
 
-		$this->assert_same( '1.5.6', ACL_AR_VERSION, '1.4.1 plugin version mismatch.' );
+		$this->assert_same( '1.5.7', ACL_AR_VERSION, '1.4.1 plugin version mismatch.' );
 		$this->assert_same( '1.4.1', ACL_AR_DB_VERSION, '1.4.1 database version mismatch.' );
 
 		try {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.7 - 2026-08-27
+
+- Kept retryable Shared Brain and independent-agent work queued or working through its persisted bounded retry schedule instead of exposing a premature terminal failure.
+- Added one-off foreground recovery with the full retry horizon while retaining WordPress cron as the durable fallback.
+- Prevented stale leases, superseded work, and Clear Chat races from publishing obsolete responses or lifecycle state.
+- Preserved atomic human and agent persistence, exact-once response recovery, truthful terminal failures, the 1.4.1 database schema, and unchanged ACL Switchboard 1.5.2.
+
 ## 1.5.6 - 2026-08-27
 
 - Rebased Shared Brain Natural Conversation timing after validated provider output is persisted, so provider latency cannot consume the configured publication cadence.

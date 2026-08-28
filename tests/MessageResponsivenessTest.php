@@ -1,5 +1,5 @@
 <?php
-/** Deterministic no-cost coverage for the 1.5.6 human-message response path. */
+/** Deterministic no-cost coverage for the 1.5.7 human-message response path. */
 
 class ACL_AR_ResponsivenessFakeSwitchboard implements \ACL\AgentRooms\Contracts\SwitchboardClientInterface {
 	public int $calls = 0;

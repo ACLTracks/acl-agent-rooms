@@ -8,7 +8,7 @@ class ACL_AR_Release102RegressionTest extends ACL_AR_TestCase {
 	}
 
 	private function version_and_schema_contract(): void {
-		$this->assert_same( '1.5.6', ACL_AR_VERSION, 'Current plugin version does not preserve the 1.0.2 repair.' );
+		$this->assert_same( '1.5.7', ACL_AR_VERSION, 'Current plugin version does not preserve the 1.0.2 repair.' );
 		$this->assert_same( '1.4.1', ACL_AR_DB_VERSION, 'Current database version does not preserve the 1.0.2 repair.' );
 		$before = $this->schema_fingerprint();
 		\ACL\AgentRooms\Installer::install();

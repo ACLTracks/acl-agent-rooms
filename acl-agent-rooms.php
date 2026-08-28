@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ACL Agent Rooms
  * Description: Room-based conversations with provider-routed agents for WordPress.
- * Version:     1.5.6
+ * Version:     1.5.7
  * Author:      ACL
  * Text Domain: acl-agent-rooms
  * Requires at least: 6.0
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ACL_AR_VERSION', '1.5.6' );
+define( 'ACL_AR_VERSION', '1.5.7' );
 define( 'ACL_AR_DB_VERSION', '1.4.1' );
 define( 'ACL_AR_FILE', __FILE__ );
 define( 'ACL_AR_DIR', plugin_dir_path( __FILE__ ) );

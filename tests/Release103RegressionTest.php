@@ -3,7 +3,7 @@
 class ACL_AR_Release103RegressionTest extends ACL_AR_TestCase {
 	public function run(): void {
 		global $wpdb;
-		$this->assert_same( '1.5.6', ACL_AR_VERSION, 'Plugin version is not 1.1.0.' );
+		$this->assert_same( '1.5.7', ACL_AR_VERSION, 'Plugin version is not 1.1.0.' );
 		$this->assert_same( '1.4.1', ACL_AR_DB_VERSION, 'Database version is not 1.1.0.' );
 		$schema = $this->schema_fingerprint();
 		\ACL\AgentRooms\Installer::install();

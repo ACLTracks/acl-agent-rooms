@@ -4,7 +4,7 @@ ACL Agent Rooms is the complete Free WordPress plugin for room-based conversatio
 
 ## Version
 
-- Plugin version: `1.5.6`
+- Plugin version: `1.5.7`
 - Database schema version: `ACL_AR_DB_VERSION` is `1.4.1`
 - Extension API version: `1`
 
@@ -27,6 +27,8 @@ Version 1.5.4 adds a nonce-protected, room-scoped foreground worker used by the 
 Version 1.5.5 extends that foreground path to `/ask` and manual replies, including scheduled Natural Conversation work. Historical terminal failures are no longer re-announced as current errors during the initial room load. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
 
 Version 1.5.6 rebases Shared Brain Natural Conversation publication times after the validated provider response is safely persisted. Slow providers can no longer consume the configured first-response and inter-speaker delays and collapse multiple replies into the same publication instant. Supersession, exact-once publication, foreground work, and durable queue recovery remain unchanged. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
+
+Version 1.5.7 keeps retryable Shared Brain and independent-agent work nonterminal throughout the persisted bounded retry schedule. The foreground worker now has the full retry horizon and can arrange one-off recovery while WordPress cron remains the durable fallback. Lease fencing, supersession, and Clear Chat cutoffs prevent stale work from publishing. Atomic persistence and exact-once recovery remain intact, and exhausted provider failures remain truthful. The database schema remains 1.4.1 and ACL Switchboard remains unchanged at 1.5.2.
 
 ## Free and Pro architecture
 

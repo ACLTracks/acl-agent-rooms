@@ -3,7 +3,7 @@ Contributors: acl
 Tags: artificial intelligence, chat, collaboration, agents, automation
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.5.6
+Stable tag: 1.5.7
 Requires PHP: 8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -89,6 +89,13 @@ User-generated data is preserved by default. Destructive uninstall requires an e
 
 == Changelog ==
 
+= 1.5.7 =
+
+* Kept retryable Shared Brain and independent-agent work nonterminal through its persisted bounded retry schedule.
+* Added full-horizon foreground recovery while retaining WordPress cron as the durable fallback.
+* Prevented stale leases, superseded work, and Clear Chat races from publishing obsolete responses.
+* Preserved atomic persistence, exact-once recovery, truthful terminal failures, the 1.4.1 database schema, and ACL Switchboard 1.5.2.
+
 = 1.5.6 =
 
 * Rebased Shared Brain Natural Conversation timing after validated provider output is saved, preserving the configured response-ready speaker cadence even when the provider is slow.
@@ -142,6 +149,10 @@ User-generated data is preserved by default. Destructive uninstall requires an e
 * Preserved same-request idempotency for ambiguous retry paths.
 
 == Upgrade Notice ==
+
+= 1.5.7 =
+
+No database migration is required. Existing data is preserved; retryable work remains nonterminal until its bounded retries are exhausted, with durable exact-once recovery.
 
 = 1.5.6 =
 
