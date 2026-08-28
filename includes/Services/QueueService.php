@@ -84,6 +84,15 @@ class QueueService {
 		return true === wp_schedule_single_event( time() + 1, self::SINGLE_HOOK, array( $job_id ) );
 	}
 
+	public function enqueue_job_retry( int $job_id, int $delay = 30 ): bool {
+		$args = array( $job_id );
+		$due  = time() + max( 1, $delay );
+		if ( function_exists( 'as_schedule_single_action' ) ) {
+			return (int) as_schedule_single_action( $due, self::SINGLE_HOOK, $args, 'acl-agent-rooms', false ) > 0;
+		}
+		return $this->schedule_wp_cron_retry( self::SINGLE_HOOK, $args, $due );
+	}
+
 	public function run_single( int $job_id ): void {
 		( new AgentRuntime() )->run_job( $job_id );
 	}
@@ -104,10 +113,11 @@ class QueueService {
 		if ( function_exists( 'as_schedule_single_action' ) ) {
 			return (int) as_schedule_single_action( $due, self::BRAIN_HOOK, $args, 'acl-agent-rooms', false ) > 0;
 		}
-		if ( wp_next_scheduled( self::BRAIN_HOOK, $args ) ) {
-			return true;
-		}
-		return true === wp_schedule_single_event( $due, self::BRAIN_HOOK, $args );
+		return $this->schedule_wp_cron_retry( self::BRAIN_HOOK, $args, $due );
+	}
+	private function schedule_wp_cron_retry( string $hook, array $args, int $due ): bool {
+		wp_clear_scheduled_hook( $hook, $args );
+		return true === wp_schedule_single_event( $due, $hook, $args );
 	}
 	public function run_brain( int $run_id ): void {
 		( new BrainRuntime() )->run( $run_id ); }

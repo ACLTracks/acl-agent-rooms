@@ -68,6 +68,12 @@ class JobRepository {
 		return $row ? AgentJob::from_row( $row ) : null;
 	}
 
+	public function find_for_update( int $id ): ?array {
+		global $wpdb;
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $this->table() . ' WHERE id = %d FOR UPDATE', $id ), ARRAY_A );
+		return $row ? AgentJob::from_row( $row ) : null;
+	}
+
 	public function find_by_request_key( string $request_key ): ?array {
 		global $wpdb;
 		$request_key = $this->normalize_request_key( $request_key );
@@ -111,6 +117,7 @@ class JobRepository {
 			LEFT JOIN {$events} q ON q.job_id = j.id AND q.event_type = 'agent_queued'
 			LEFT JOIN {$events} c ON c.job_id = j.id AND c.event_type = 'agent_completed'
 			LEFT JOIN {$events} f ON f.job_id = j.id AND f.event_type = 'agent_failed'
+				AND f.idempotency_key = SHA2(CONCAT('agent-job:',j.id,':agent_failed',CASE WHEN j.attempts>1 THEN CONCAT(':attempt-',j.attempts) ELSE '' END),256)
 			WHERE q.id IS NULL OR (j.status = 'completed' AND c.id IS NULL) OR (j.status = 'failed' AND f.id IS NULL)
 			ORDER BY j.id ASC LIMIT %d",
 			$limit
@@ -128,6 +135,7 @@ class JobRepository {
 			LEFT JOIN {$events} q ON q.job_id = j.id AND q.event_type = 'agent_queued'
 			LEFT JOIN {$events} c ON c.job_id = j.id AND c.event_type = 'agent_completed'
 			LEFT JOIN {$events} f ON f.job_id = j.id AND f.event_type = 'agent_failed'
+				AND f.idempotency_key = SHA2(CONCAT('agent-job:',j.id,':agent_failed',CASE WHEN j.attempts>1 THEN CONCAT(':attempt-',j.attempts) ELSE '' END),256)
 			WHERE q.id IS NULL OR (j.status = 'completed' AND c.id IS NULL) OR (j.status = 'failed' AND f.id IS NULL)"
 		);
 	}
@@ -188,8 +196,25 @@ class JobRepository {
 		$where = array( 'id' => $id );
 		if ( '' !== $lease_token ) {
 			$where['lease_token'] = $lease_token;
+		} else {
+			$current = $this->find( $id );
+			if ( ! $current ) {
+				return false;
+			}
+			if ( 'completed' === (string) $current['status'] ) {
+				return (int) $current['response_message_id'] === $response_message_id;
+			}
+			$recoverable = in_array( (string) $current['status'], array( 'pending', 'running' ), true ) || ( 'failed' === (string) $current['status'] && ! empty( $current['retryable'] ) );
+			if ( ! $recoverable || ! empty( $current['response_message_id'] ) ) {
+				return false;
+			}
+			$where['status']              = (string) $current['status'];
+			$where['response_message_id'] = null;
+			if ( 'failed' === (string) $current['status'] ) {
+				$where['retryable'] = 1;
+			}
 		}
-		return false !== $wpdb->update( $this->table(), $data, $where );
+		return 1 === $wpdb->update( $this->table(), $data, $where );
 	}
 
 	public function fail( int $id, string $message, string $code = '', string $public = '', bool $retryable = false, int $delay = 0, string $lease_token = '' ): bool {
@@ -200,7 +225,7 @@ class JobRepository {
 		if ( '' !== $lease_token ) {
 			$where['lease_token'] = $lease_token;
 		}
-		return false !== $wpdb->update(
+		return 1 === $wpdb->update(
 			$this->table(),
 			array(
 				'status'           => 'failed',
@@ -236,31 +261,40 @@ class JobRepository {
 	}
 	public function cancel( int $id, string $code = 'agent_paused' ): bool {
 		global $wpdb;
-		$now     = Time::mysql_gmt();
-		$cleared = 'chat_cleared' === $code;
-		return false !== $wpdb->update(
-			$this->table(),
-			array(
-				'status'           => 'canceled',
-				'retryable'        => 0,
-				'error_code'       => sanitize_key( $code ),
-				'error_message'    => $cleared ? 'The triggering message was cleared.' : 'Agent participation paused.',
-				'public_error'     => $cleared ? 'The room transcript was cleared.' : 'Agent is paused.',
-				'lease_token'      => null,
-				'locked_at'        => null,
-				'lease_expires_at' => null,
-				'next_attempt_at'  => null,
-				'completed_at'     => $now,
-				'updated_at'       => $now,
-			),
-			array( 'id' => $id ),
-			null,
-			array( '%d' )
-		); }
+		$table      = $this->table();
+		$now        = Time::mysql_gmt();
+		$code       = sanitize_key( $code );
+		$cleared    = 'chat_cleared' === $code;
+		$superseded = 'superseded' === $code;
+		$message    = $cleared ? 'The triggering message was cleared.' : ( $superseded ? 'The triggering message was superseded.' : 'Agent participation paused.' );
+		$public     = $cleared ? 'The room transcript was cleared.' : ( $superseded ? 'The conversation advanced before this response completed.' : 'Agent is paused.' );
+		$sql        = $wpdb->prepare(
+			"UPDATE {$table} SET status='canceled',retryable=0,error_code=%s,error_message=%s,public_error=%s,lease_token=NULL,locked_at=NULL,lease_expires_at=NULL,next_attempt_at=NULL,completed_at=%s,updated_at=%s WHERE id=%d AND response_message_id IS NULL AND (status IN ('pending','running') OR (status='failed' AND retryable=1))",
+			$code,
+			$message,
+			$public,
+			$now,
+			$now,
+			$id
+		);
+		$updated    = $wpdb->query( $sql );
+		if ( false === $updated ) {
+			return false;
+		}
+		if ( $updated > 0 ) {
+			return true;
+		}
+		$current = $this->find( $id );
+		return $current && ( in_array( (string) $current['status'], array( 'completed', 'canceled' ), true ) || ( 'failed' === (string) $current['status'] && empty( $current['retryable'] ) ) ); }
 
 	public function has_running( int $room_id, int $agent_id ): bool {
 		global $wpdb;
 		return (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$this->table()} WHERE room_id=%d AND agent_id=%d AND status='running' AND response_message_id IS NULL AND lease_expires_at>%s", $room_id, $agent_id, Time::mysql_gmt() ) ) > 0; }
+	public function active_for_assignment( int $room_id, int $agent_id ): ?array {
+		global $wpdb;
+		$now = Time::mysql_gmt();
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE room_id=%d AND agent_id=%d AND response_message_id IS NULL AND (status IN ('pending','running') OR (status='failed' AND retryable=1 AND next_attempt_at IS NOT NULL AND attempts<%d)) ORDER BY CASE WHEN status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at>%s THEN 0 ELSE 1 END,id DESC LIMIT 1", $room_id, $agent_id, JobRetryPolicy::MAX_ATTEMPTS, $now ), ARRAY_A );
+		return $row ? AgentJob::from_row( $row ) : null; }
 	public function latest_for_assignment( int $room_id, int $agent_id ): ?array {
 		global $wpdb;
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . $this->table() . ' WHERE room_id=%d AND agent_id=%d ORDER BY id DESC LIMIT 1', $room_id, $agent_id ), ARRAY_A );

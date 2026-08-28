@@ -38,7 +38,11 @@ class AgentStateReconciler {
 		} elseif ( 'paused' === (string) $p['participation_state'] ) {
 			$state = $this->jobs->has_running( $room_id, $agent_id ) ? 'pausing' : 'paused';
 		} elseif ( $turn ) {
-			$state = 'typing' === $turn['status'] ? 'typing' : ( 'publishing' === $turn['status'] ? 'responding' : 'ready' );
+			$turn_job = ! empty( $turn['job_id'] ) ? $this->jobs->find( (int) $turn['job_id'] ) : null;
+			$turn_run = ! empty( $turn['brain_run_id'] ) ? $this->brain_runs->find( (int) $turn['brain_run_id'] ) : null;
+			$retrying = ( $turn_job && 'failed' === (string) $turn_job['status'] && ! empty( $turn_job['retryable'] ) )
+				|| ( $turn_run && 'failed' === (string) $turn_run['status'] && ! empty( $turn_run['next_attempt_at'] ) );
+			$state    = $retrying ? 'queued' : ( 'typing' === $turn['status'] ? 'typing' : ( 'publishing' === $turn['status'] ? 'responding' : 'ready' ) );
 		} elseif ( 'brain' === (string) ( $a['execution_mode'] ?? 'independent' ) ) {
 			$brain = ! empty( $a['brain_id'] ) ? $this->brains->find( (int) $a['brain_id'] ) : null;
 			if ( ! $brain || empty( $brain['enabled'] ) ) {
@@ -49,11 +53,16 @@ class AgentStateReconciler {
 					'pending'        => 'queued',
 					'running'        => 'thinking',
 					'response_saved' => 'responding',
+					'failed'         => 'queued',
 				);
 				$state = $run ? ( $map[ $run['status'] ] ?? 'ready' ) : 'ready';
 			}
-		} elseif ( $this->jobs->has_running( $room_id, $agent_id ) ) {
-			$state = 'thinking';
+		} else {
+			$job = $this->jobs->active_for_assignment( $room_id, $agent_id );
+			if ( $job ) {
+				$running = 'running' === (string) $job['status'] && ! empty( $job['lease_expires_at'] ) && strtotime( (string) $job['lease_expires_at'] . ' UTC' ) > time();
+				$state   = $running ? 'thinking' : 'queued';
+			}
 		}$current = $this->presence->find( $room_id, 'agent', $agent_id );
 		if ( $current && 'error' === $current['state'] && ! empty( $current['expires_at'] ) && strtotime( $current['expires_at'] . ' UTC' ) > time() && 'ready' === $state ) {
 			return 'error';

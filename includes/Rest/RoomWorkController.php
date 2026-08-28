@@ -121,7 +121,7 @@ class RoomWorkController extends AbstractController {
 			$this->brain_runtime->run( (int) $run_id );
 		}
 		foreach ( array_keys( $jobs ) as $job_id ) {
-			$this->agent_runtime->run_job( (int) $job_id, true );
+			$this->agent_runtime->run_job( (int) $job_id );
 		}
 
 		$turn_result = $this->turns->run_due_for_room( $room_id, 20 );
@@ -138,7 +138,7 @@ class RoomWorkController extends AbstractController {
 				'turns'          => $turn_result,
 				'pending_turns'  => $this->turn_repository->pending_count( $room_id ),
 				'pending'        => $pending,
-				'retry_after_ms' => $pending ? $this->retry_after_ms( $room_id, $brain_rows ) : 0,
+				'retry_after_ms' => $pending ? $this->retry_after_ms( $room_id, $brain_rows, $job_rows ) : 0,
 			),
 			200,
 			array( 'Cache-Control' => 'private, no-store' )
@@ -157,9 +157,12 @@ class RoomWorkController extends AbstractController {
 
 	private function job_summary( ?array $job ): array {
 		return array(
-			'id'     => (int) ( $job['id'] ?? 0 ),
-			'status' => (string) ( $job['status'] ?? 'missing' ),
-			'error'  => (string) ( $job['public_error'] ?? '' ),
+			'id'              => (int) ( $job['id'] ?? 0 ),
+			'status'          => (string) ( $job['status'] ?? 'missing' ),
+			'attempts'        => (int) ( $job['attempts'] ?? 0 ),
+			'retryable'       => ! empty( $job['retryable'] ),
+			'next_attempt_at' => $job['next_attempt_at'] ?? null,
+			'error'           => (string) ( $job['public_error'] ?? '' ),
 		);
 	}
 
@@ -169,15 +172,16 @@ class RoomWorkController extends AbstractController {
 	}
 
 	public function job_pending( array $job ): bool {
-		return in_array( (string) $job['status'], array( 'pending', 'running' ), true );
+		return in_array( (string) $job['status'], array( 'pending', 'running' ), true )
+			|| ( 'failed' === (string) $job['status'] && ! empty( $job['retryable'] ) && ! empty( $job['next_attempt_at'] ) );
 	}
 
-	private function retry_after_ms( int $room_id, array $runs ): int {
+	private function retry_after_ms( int $room_id, array $runs, array $jobs ): int {
 		$candidates = array();
 		$now        = time();
-		foreach ( $runs as $run ) {
-			if ( ! empty( $run['next_attempt_at'] ) ) {
-				$candidates[] = max( 1, strtotime( (string) $run['next_attempt_at'] . ' UTC' ) - $now );
+		foreach ( array_merge( $runs, $jobs ) as $work ) {
+			if ( ! empty( $work['next_attempt_at'] ) ) {
+				$candidates[] = max( 1, strtotime( (string) $work['next_attempt_at'] . ' UTC' ) - $now );
 			}
 		}
 		$next_turn = $this->turn_repository->next_work_at( $room_id );

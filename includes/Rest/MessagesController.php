@@ -298,7 +298,8 @@ class MessagesController extends AbstractController {
 		if ( ! empty( $selected_files ) ) {
 			$metadata['room_file_ids'] = $selected_files; }
 
-		$persisted = ( new HumanMessageService( $this->rooms, $this->messages, $this->events ) )->persist( $room_id, get_current_user_id(), $message_content, $client_request_id, $metadata );
+		$advance_natural_trigger = 'natural' === (string) ( $room['conversation_mode'] ?? 'immediate' ) && ( 'automatic' === $trigger_mode || ! empty( $forced_ids ) );
+		$persisted                = ( new HumanMessageService( $this->rooms, $this->messages, $this->events ) )->persist( $room_id, get_current_user_id(), $message_content, $client_request_id, $metadata, $advance_natural_trigger );
 		if ( is_wp_error( $persisted ) ) {
 			return $persisted; }
 		$message_id    = (int) $persisted['message']['id'];

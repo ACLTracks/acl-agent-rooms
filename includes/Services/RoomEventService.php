@@ -49,7 +49,11 @@ class RoomEventService {
 		if ( ! in_array( $event_type, array( RoomEvent::TYPE_AGENT_QUEUED, RoomEvent::TYPE_AGENT_THINKING, RoomEvent::TYPE_AGENT_RESPONDING, RoomEvent::TYPE_AGENT_COMPLETED, RoomEvent::TYPE_AGENT_FAILED ), true ) ) {
 			return new \WP_Error( 'acl_ar_event_invalid_lifecycle', __( 'Invalid agent lifecycle event type.', 'acl-agent-rooms' ) );
 		}
-		$key            = $this->key( 'agent-job:' . (int) $job['id'] . ':' . $event_type );
+		$key_source = 'agent-job:' . (int) $job['id'] . ':' . $event_type;
+		if ( in_array( $event_type, array( RoomEvent::TYPE_AGENT_THINKING, RoomEvent::TYPE_AGENT_RESPONDING, RoomEvent::TYPE_AGENT_FAILED ), true ) && (int) ( $job['attempts'] ?? 0 ) > 1 ) {
+			$key_source .= ':attempt-' . (int) $job['attempts'];
+		}
+		$key            = $this->key( $key_source );
 		$existing       = $this->events->find_by_idempotency_key( $key );
 		$clean_metadata = $this->normalize_metadata( $metadata );
 		if ( $existing ) {
@@ -90,6 +94,7 @@ class RoomEventService {
 				$job,
 				RoomEvent::TYPE_AGENT_FAILED,
 				array(
+					'attempt'   => (int) ( $job['attempts'] ?? 0 ),
 					'attempts'  => (int) ( $job['attempts'] ?? 0 ),
 					'retryable' => ! empty( $job['retryable'] ),
 					'error'     => PublicError::message( (string) ( $job['public_error'] ?? '' ), __( 'Agent reply failed.', 'acl-agent-rooms' ) ),

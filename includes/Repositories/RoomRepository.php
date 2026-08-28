@@ -93,6 +93,21 @@ class RoomRepository {
 		);
 	}
 
+	/** Advance, but never regress, the durable Natural Conversation trigger boundary. */
+	public function advance_natural_trigger( int $id, int $event_id ): bool {
+		global $wpdb;
+		$table = $this->table();
+		$now   = Time::mysql_gmt();
+		$sql   = $wpdb->prepare(
+			"UPDATE {$table} SET natural_active_trigger_event_id=%d,updated_at=%s WHERE id=%d AND (natural_active_trigger_event_id IS NULL OR natural_active_trigger_event_id<%d)",
+			$event_id,
+			$now,
+			$id,
+			$event_id
+		);
+		return false !== $wpdb->query( $sql );
+	}
+
 	public function create( array $data ) {
 		global $wpdb;
 

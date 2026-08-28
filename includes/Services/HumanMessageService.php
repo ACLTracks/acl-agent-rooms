@@ -32,7 +32,7 @@ class HumanMessageService {
 	/**
 	 * @return array{message:array,event:array,created:bool}|\WP_Error
 	 */
-	public function persist( int $room_id, int $user_id, string $content, string $client_request_id, array $metadata = array() ) {
+	public function persist( int $room_id, int $user_id, string $content, string $client_request_id, array $metadata = array(), bool $advance_natural_trigger = false ) {
 		global $wpdb;
 
 		$wpdb->last_error = '';
@@ -57,6 +57,10 @@ class HumanMessageService {
 		if ( ! $message || is_wp_error( $event ) || ! is_array( $event ) ) {
 			$wpdb->query( 'ROLLBACK' );
 			return is_wp_error( $event ) ? $event : new \WP_Error( 'acl_ar_human_message_event_failed', __( 'The message event could not be saved safely.', 'acl-agent-rooms' ), array( 'status' => 500 ) );
+		}
+		if ( $advance_natural_trigger && 'natural' === (string) ( $locked_room['conversation_mode'] ?? 'immediate' ) && ! $this->rooms->advance_natural_trigger( $room_id, (int) $event['id'] ) ) {
+			$wpdb->query( 'ROLLBACK' );
+			return new \WP_Error( 'acl_ar_natural_trigger_advance_failed', __( 'The conversation could not advance safely.', 'acl-agent-rooms' ), array( 'status' => 500 ) );
 		}
 
 		$read_boundary = $this->reads->advance( $room_id, $user_id, (int) $event['id'] );

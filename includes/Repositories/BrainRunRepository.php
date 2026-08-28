@@ -69,7 +69,7 @@ class BrainRunRepository {
 		global $wpdb;
 		$now   = Time::mysql_gmt();
 		$stale = gmdate( 'Y-m-d H:i:s', time() - 180 );
-		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE status='response_saved' OR (attempts<%d AND ((status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=%s)) OR (status='failed' AND next_attempt_at IS NOT NULL AND next_attempt_at<=%s) OR (status='running' AND locked_at<=%s))) ORDER BY id LIMIT %d", self::MAX_ATTEMPTS, $now, $now, $stale, max( 1, min( 20, $limit ) ) ), ARRAY_A );
+		$rows  = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$this->table()} WHERE (status='response_saved' AND (next_attempt_at IS NULL OR next_attempt_at<=%s)) OR (attempts<%d AND ((status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=%s)) OR (status='failed' AND next_attempt_at IS NOT NULL AND next_attempt_at<=%s) OR (status='running' AND locked_at<=%s))) ORDER BY id LIMIT %d", $now, self::MAX_ATTEMPTS, $now, $now, $stale, max( 1, min( 20, $limit ) ) ), ARRAY_A );
 		return array_map( array( BrainRun::class, 'from_row' ), is_array( $rows ) ? $rows : array() ); }
 	public function acquire( int $id, string $token, int $lease_seconds = 180, bool $intentional = false ): bool {
 		global $wpdb;
@@ -81,10 +81,11 @@ class BrainRunRepository {
 		return $wpdb->rows_affected > 0; }
 	public function update_targets( int $id, array $ids, string $token ): bool {
 		global $wpdb;
-		return false !== $wpdb->update(
+		$ids     = array_values( array_map( 'absint', $ids ) );
+		$updated = $wpdb->update(
 			$this->table(),
 			array(
-				'target_agent_ids_json' => Json::encode( array_values( array_map( 'absint', $ids ) ) ),
+				'target_agent_ids_json' => Json::encode( $ids ),
 				'updated_at'            => Time::mysql_gmt(),
 			),
 			array(
@@ -93,10 +94,15 @@ class BrainRunRepository {
 			),
 			array( '%s', '%s' ),
 			array( '%d', '%s' )
-		); }
+		);
+		if ( 1 === $updated ) {
+			return true;
+		}
+		$current = 0 === $updated ? $this->find( $id ) : null;
+		return $current && hash_equals( $token, (string) $current['lease_token'] ) && $ids === $current['target_agent_ids']; }
 	public function save_response( int $id, array $responses, array $usage, string $token ): bool {
 		global $wpdb;
-		return false !== $wpdb->update(
+		return 1 === $wpdb->update(
 			$this->table(),
 			array(
 				'status'                  => 'response_saved',
@@ -108,24 +114,27 @@ class BrainRunRepository {
 				'lease_token'             => null,
 				'locked_at'               => null,
 				'next_attempt_at'         => null,
+				'error_code'              => null,
+				'public_error'            => null,
 				'updated_at'              => Time::mysql_gmt(),
 			),
 			array(
 				'id'          => $id,
 				'lease_token' => $token,
 			),
-			array( '%s', '%s', '%d', '%d', '%d', '%f', '%s', '%s', '%s', '%s' ),
+			array( '%s', '%s', '%d', '%d', '%d', '%f', '%s', '%s', '%s', '%s', '%s', '%s' ),
 			array( '%d', '%s' )
 		); }
 	public function complete( int $id, array $event_ids ): bool {
 		global $wpdb;
-		$now = Time::mysql_gmt();
-		return false !== $wpdb->update(
+		$now       = Time::mysql_gmt();
+		$event_ids = array_values( array_map( 'absint', $event_ids ) );
+		$updated   = $wpdb->update(
 			$this->table(),
 			array(
 				'status'                  => 'completed',
 				'validated_response_json' => null,
-				'response_event_ids_json' => Json::encode( array_values( array_map( 'absint', $event_ids ) ) ),
+				'response_event_ids_json' => Json::encode( $event_ids ),
 				'lease_token'             => null,
 				'locked_at'               => null,
 				'next_attempt_at'         => null,
@@ -134,16 +143,26 @@ class BrainRunRepository {
 				'completed_at'            => $now,
 				'updated_at'              => $now,
 			),
-			array( 'id' => $id )
-		); }
+			array(
+				'id'     => $id,
+				'status' => 'response_saved',
+			)
+		);
+		if ( 1 === $updated ) {
+			return true;
+		}
+		$current = 0 === $updated ? $this->find( $id ) : null;
+		return $current && 'completed' === (string) $current['status'] && $event_ids === $current['response_event_ids']; }
 	public function fail( int $id, string $code, string $public, bool $retryable, int $delay, string $token = '' ): bool {
 		global $wpdb;
 		$where = array( 'id' => $id );
 		if ( $token ) {
 			$where['lease_token'] = $token;
+		} else {
+			$where['status'] = 'response_saved';
 		}$current = $this->find( $id );
 		$next     = $retryable && $current && $current['attempts'] < self::MAX_ATTEMPTS ? gmdate( 'Y-m-d H:i:s', time() + max( 1, $delay ) ) : null;
-		return false !== $wpdb->update(
+		return 1 === $wpdb->update(
 			$this->table(),
 			array(
 				'status'          => 'failed',
@@ -156,9 +175,15 @@ class BrainRunRepository {
 			),
 			$where
 		); }
-	public function cancel( int $id, string $code = 'brain_unavailable', string $public = '' ): bool {
+	public function cancel( int $id, string $code = 'brain_unavailable', string $public = '', string $token = '' ): bool {
 		global $wpdb;
-		return false !== $wpdb->update(
+		$where = array( 'id' => $id );
+		if ( '' !== $token ) {
+			$where['lease_token'] = $token;
+		} else {
+			$where['status'] = 'response_saved';
+		}
+		$updated = $wpdb->update(
 			$this->table(),
 			array(
 				'status'          => 'canceled',
@@ -170,11 +195,18 @@ class BrainRunRepository {
 				'completed_at'    => Time::mysql_gmt(),
 				'updated_at'      => Time::mysql_gmt(),
 			),
-			array( 'id' => $id )
-		); }
+			$where
+		);
+		if ( 1 === $updated ) {
+			return true;
+		}
+		$current = '' === $token && 0 === $updated ? $this->find( $id ) : null;
+		return $current && in_array( (string) $current['status'], array( 'completed', 'canceled' ), true ); }
 	public function active_for_assignment( int $room_id, int $agent_id ): ?array {
 		foreach ( $this->for_room( $room_id, 100 ) as $run ) {
-			if ( in_array( $run['status'], array( 'pending', 'running', 'response_saved' ), true ) && in_array( $agent_id, $run['target_agent_ids'], true ) ) {
+			$active = in_array( $run['status'], array( 'pending', 'running', 'response_saved' ), true )
+				|| ( 'failed' === $run['status'] && ! empty( $run['next_attempt_at'] ) && (int) $run['attempts'] < self::MAX_ATTEMPTS );
+			if ( $active && in_array( $agent_id, $run['target_agent_ids'], true ) ) {
 				return $run;
 			}
 		}return null; }

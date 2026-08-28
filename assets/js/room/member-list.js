@@ -1,12 +1,17 @@
 (function (root, factory) {
 	'use strict';
-	/* Stable Phase 8 contracts: active:'In room' idle:'Idle' away:'Away' return'Agents' offline:'Recently active' event.type==='presence_change' target.state='Paused' activityState||'ready' agent_failed:'Error' */
+	/* Stable Phase 8 contracts: active:'In room' idle:'Idle' away:'Away' return'Agents' offline:'Recently active' event.type==='presence_change' target.state='Paused' activityState||'ready' */
 	var Members = factory();
 	if (typeof module === 'object' && module.exports) { module.exports = Members; }
 	root.ACLARRoomMembers = Members;
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 	'use strict';
 	var lifecycle = {agent_queued: 'Queued', agent_thinking: 'Thinking', agent_responding: 'Responding', agent_completed: 'Ready', agent_failed: 'Error'};
+	function lifecycleState(event) {
+		if (!event || !lifecycle[event.type]) { return ''; }
+		if (event.type === 'agent_failed' && event.metadata && event.metadata.retryable) { return 'Queued'; }
+		return lifecycle[event.type];
+	}
 	function title(state) { return String(state || '').replace(/(^|_)([a-z])/g, function (_, space, letter) { return (space ? ' ' : '') + letter.toUpperCase(); }); }
 	function Members(container, config, doc) {
 		this.container = container; this.config = config || {}; this.doc = doc || (typeof document !== 'undefined' ? document : null);
@@ -28,10 +33,11 @@
 		}, this);
 		this.people = next; this.summary = summary || this.summary; this.presenceVersion = String(sync && sync.presence_version || ''); this.lastPresenceSync = Date.now(); this.presenceError = ''; this.render();
 	};
-	Members.prototype.consume = function (events) {
+	Members.prototype.consume = function (events, options) {
 		/* Stable activity contract: if(event.type==='message') */
-		var changed = false;
+		var changed = false, replay = !!(options && options.replay);
 		(events || []).forEach(function (event) {
+			if (replay && (event.type === 'presence_change' || lifecycle[event.type])) { return; }
 			if (event.type === 'presence_change' && event.target && event.target.type === 'agent') {
 				var target = this.people[this.key('agent', event.target.id)], metadata = event.metadata || {};
 				if (target) { target.participation = {state: metadata.participation_state || 'active', auto_muted: !!metadata.auto_muted, can_manual_invoke: metadata.participation_state !== 'paused'}; if (metadata.participation_state === 'paused' && ['Thinking', 'Responding'].indexOf(target.state) < 0) { target.state = 'Paused'; target.presenceState = 'paused'; } changed = true; }
@@ -41,7 +47,8 @@
 			if ((actor.type === 'user' || actor.type === 'agent') && actor.id) {
 				if (!this.people[key]) { this.people[key] = {type: actor.type, id: actor.id, name: actor.name || 'Former participant', avatarUrl: actor.avatar_url || null, state: actor.type === 'agent' ? 'Ready' : 'Recently active', presenceState: actor.type === 'agent' ? 'ready' : 'offline', isCurrent: actor.type === 'user' && parseInt(actor.id, 10) === parseInt(this.config.currentUserId, 10), count: 0}; changed = true; }
 				if (event.type === 'message') { this.people[key].count += 1; changed = true; }
-				if (actor.type === 'agent' && lifecycle[event.type]) { this.people[key].state = lifecycle[event.type]; this.people[key].presenceState = lifecycle[event.type].toLowerCase(); changed = true; }
+				var state = actor.type === 'agent' ? lifecycleState(event) : '';
+				if (state) { this.people[key].state = state; this.people[key].presenceState = state.toLowerCase(); changed = true; }
 			}
 		}, this);
 		if (changed) { this.render(); } return changed;
@@ -74,5 +81,6 @@
 	};
 	Members.prototype.getSelected = function () { return this.selected ? this.people[this.selected] || null : null; };
 	Members.lifecycle = lifecycle;
+	Members.lifecycleState = lifecycleState;
 	return Members;
 }));

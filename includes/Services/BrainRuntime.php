@@ -57,11 +57,30 @@ class BrainRuntime {
 			return new \WP_Error( 'acl_ar_brain_run_not_found', __( 'Brain run was not found.', 'acl-agent-rooms' ), array( 'status' => 404 ) );
 		} if ( in_array( $run['status'], array( 'completed', 'canceled' ), true ) ) {
 			return $run;
-		} if ( 'response_saved' === $run['status'] || ! empty( $run['validated_responses'] ) ) {
+		} if ( 'response_saved' === $run['status'] ) {
+			if ( ! $intentional_retry && ! empty( $run['next_attempt_at'] ) && strtotime( (string) $run['next_attempt_at'] . ' UTC' ) > time() ) {
+				return new \WP_Error( 'acl_ar_brain_run_not_due', __( 'Shared Brain recovery is not due yet.', 'acl-agent-rooms' ), array( 'status' => 409 ) );
+			}
 			return $this->resume_saved( $run );}
 		$token = hash( 'sha256', wp_generate_uuid4() . '|' . $run_id . '|' . microtime( true ) );
 		if ( ! $this->runs->acquire( $run_id, $token, 180, $intentional_retry ) ) {
 			return new \WP_Error( 'acl_ar_brain_run_locked', __( 'Brain run is already being executed.', 'acl-agent-rooms' ), array( 'status' => 409 ) );}
+		$run = $this->runs->find( $run_id );
+		if ( ! $run ) {
+			return $this->lease_lost();
+		}
+		if ( ! empty( $run['validated_responses'] ) ) {
+			$usage = array(
+				'prompt_tokens'     => (int) $run['prompt_tokens'],
+				'completion_tokens' => (int) $run['completion_tokens'],
+				'total_tokens'      => (int) $run['total_tokens'],
+				'estimated_cost'    => (float) $run['estimated_cost'],
+			);
+			if ( ! $this->runs->save_response( $run_id, $run['validated_responses'], $usage, $token ) ) {
+				return $this->lease_lost();
+			}
+			return $this->resume_saved( $this->runs->find( $run_id ) );
+		}
 		$run     = $this->runs->find( $run_id );
 		$room    = $this->rooms->find( (int) $run['room_id'] );
 		$brain   = $this->config->runtime( (int) $run['brain_id'] );
@@ -87,7 +106,9 @@ class BrainRuntime {
 		if ( ! $eligible ) {
 			return $this->cancel( $run, new \WP_Error( 'acl_ar_brain_run_no_targets', __( 'No eligible agents remain for this Brain run.', 'acl-agent-rooms' ) ), $token, 'unavailable' );}
 		$ids = array_map( static fn( $a )=> (int) $a['id'], $eligible );
-		$this->runs->update_targets( $run_id, $ids, $token );
+		if ( ! $this->runs->update_targets( $run_id, $ids, $token ) ) {
+			return $this->lease_lost();
+		}
 		if ( ! $natural ) {
 			$this->states->project( (int) $room['id'], $ids, 'thinking', $run_id );
 		} $trigger['legacy_message_id'] = (int) ( $trigger['legacy_message_id'] ?? 0 );
@@ -166,9 +187,17 @@ class BrainRuntime {
 		if ( is_wp_error( $result ) ) {
 			if ( 'acl_ar_trigger_cleared' === $result->get_error_code() ) {
 				return $this->cancel( $run, $result, '', 'ready' );
-			}$this->runs->fail( (int) $run['id'], 'acl_ar_brain_fanout_failed', __( 'Shared Brain responses are awaiting safe recovery.', 'acl-agent-rooms' ), true, 30 );
-			( new QueueService() )->enqueue_brain_retry( (int) $run['id'], 30 );
-			$this->states->project( (int) $run['room_id'], $run['target_agent_ids'], 'error', (int) $run['id'] );
+			}if ( ! $this->runs->fail( (int) $run['id'], 'acl_ar_brain_fanout_failed', __( 'Shared Brain responses are awaiting safe recovery.', 'acl-agent-rooms' ), true, 30 ) ) {
+				return new \WP_Error( 'acl_ar_brain_run_state_changed', __( 'Shared Brain recovery ownership changed before the failure could be saved.', 'acl-agent-rooms' ), array( 'status' => 409 ) );
+			}
+			$fresh      = $this->runs->find( (int) $run['id'] );
+			$will_retry = $fresh && ! empty( $fresh['next_attempt_at'] );
+			if ( $will_retry ) {
+				( new QueueService() )->enqueue_brain_retry( (int) $run['id'], 30 );
+			} else {
+				$this->terminal_event( $fresh ?: $run, 'failed', 0, 0, $result, 'fanout' );
+			}
+			$this->states->project( (int) $run['room_id'], $run['target_agent_ids'], $will_retry ? 'responding' : 'error', (int) $run['id'] );
 			return $result;
 		} $this->states->project( (int) $run['room_id'], $run['target_agent_ids'], 'ready', (int) $run['id'] );
 		return $this->runs->find( (int) $run['id'] );
@@ -270,17 +299,23 @@ class BrainRuntime {
 			)
 		);}
 	private function failure( array $run, \WP_Error $error, string $token, array $ids, bool $retryable, string $stage = '', int $retry_delay = 30 ) {
-		$attempts   = (int) ( $this->runs->find( (int) $run['id'] )['attempts'] ?? 0 );
-		$will_retry = $retryable && $attempts < BrainRunRepository::MAX_ATTEMPTS;
+		$attempts    = (int) ( $this->runs->find( (int) $run['id'] )['attempts'] ?? 0 );
+		$will_retry  = $retryable && $attempts < BrainRunRepository::MAX_ATTEMPTS;
 		$retry_delay = max( 1, $retry_delay );
-		$this->runs->fail( (int) $run['id'], $error->get_error_code(), PublicError::from_error( $error, __( 'Shared Brain execution failed.', 'acl-agent-rooms' ) ), $will_retry, $retry_delay, $token );
+		if ( ! $this->runs->fail( (int) $run['id'], $error->get_error_code(), PublicError::from_error( $error, __( 'Shared Brain execution failed.', 'acl-agent-rooms' ) ), $will_retry, $retry_delay, $token ) ) {
+			return $this->lease_lost();
+		}
+		$fresh      = $this->runs->find( (int) $run['id'] );
+		if ( ! $fresh ) {
+			return $this->lease_lost();
+		}
+		$will_retry = $fresh && ! empty( $fresh['next_attempt_at'] );
 		if ( $will_retry ) {
 			( new QueueService() )->enqueue_brain_retry( (int) $run['id'], $retry_delay );
 		} else {
 			$this->turns->cancel_for_brain( (int) $run['id'], 'brain_failed' );
-			$fresh = $this->runs->find( (int) $run['id'] );
 			$this->terminal_event( $fresh, 'failed', 0, count( $this->turns->for_brain_run( (int) $run['id'] ) ), $error, $stage );
-		}$this->states->project( (int) $run['room_id'], $ids, 'error', (int) $run['id'] );
+		}$this->states->project( (int) $run['room_id'], $ids, $will_retry ? 'queued' : 'error', (int) $run['id'] );
 		return $error; }
 	private function retryable_response_error( \WP_Error $error ): bool {
 		return in_array(
@@ -301,12 +336,22 @@ class BrainRuntime {
 		);
 	}
 	private function cancel( array $run, \WP_Error $error, string $token = '', string $state = 'unavailable' ) {
-		$this->turns->cancel_for_brain( (int) $run['id'], $error->get_error_code() );
-		$this->runs->cancel( (int) $run['id'], $error->get_error_code(), PublicError::from_error( $error, __( 'Shared Brain execution was canceled.', 'acl-agent-rooms' ) ) );
+		if ( ! $this->runs->cancel( (int) $run['id'], $error->get_error_code(), PublicError::from_error( $error, __( 'Shared Brain execution was canceled.', 'acl-agent-rooms' ) ), $token ) ) {
+			return '' !== $token ? $this->lease_lost() : new \WP_Error( 'acl_ar_brain_run_state_changed', __( 'Shared Brain state changed before cancellation could be saved.', 'acl-agent-rooms' ), array( 'status' => 409 ) );
+		}
 		$fresh = $this->runs->find( (int) $run['id'] );
+		if ( $fresh && 'completed' === (string) $fresh['status'] ) {
+			return $fresh;
+		}
+		if ( ! $fresh || 'canceled' !== (string) $fresh['status'] ) {
+			return new \WP_Error( 'acl_ar_brain_run_state_changed', __( 'Shared Brain state changed before cancellation could be confirmed.', 'acl-agent-rooms' ), array( 'status' => 409 ) );
+		}
+		$this->turns->cancel_for_brain( (int) $run['id'], $error->get_error_code() );
 		$this->terminal_event( $fresh, 'canceled', 0, count( $this->turns->for_brain_run( (int) $run['id'] ) ), $error, 'canceled' );
 		$this->states->project( (int) $run['room_id'], $run['target_agent_ids'], $state, (int) $run['id'] );
 		return $error; }
+	private function lease_lost(): \WP_Error {
+		return new \WP_Error( 'acl_ar_brain_run_lease_lost', __( 'Shared Brain execution ownership changed before this worker could save its result.', 'acl-agent-rooms' ), array( 'status' => 409 ) ); }
 	private function log_usage( array $run, array $usage ): void {
 		$this->usage->log(
 			array(

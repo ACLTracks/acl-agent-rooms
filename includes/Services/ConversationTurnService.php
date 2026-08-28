@@ -13,7 +13,6 @@ use ACL\AgentRooms\Repositories\JobRepository;
 use ACL\AgentRooms\Repositories\MessageRepository;
 use ACL\AgentRooms\Repositories\PresenceRepository;
 use ACL\AgentRooms\Repositories\RoomRepository;
-use ACL\AgentRooms\Support\Time;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit; }
@@ -40,17 +39,7 @@ class ConversationTurnService {
 		$this->room_events = new RoomEventService( $this->events ); }
 
 	public function activate_trigger( array $room, int $trigger_event_id ): int {
-		global $wpdb;
-		$wpdb->update(
-			$wpdb->prefix . 'acl_ar_rooms',
-			array(
-				'natural_active_trigger_event_id' => $trigger_event_id,
-				'updated_at'                      => Time::mysql_gmt(),
-			),
-			array( 'id' => (int) $room['id'] ),
-			array( '%d', '%s' ),
-			array( '%d' )
-		);
+		$this->rooms->advance_natural_trigger( (int) $room['id'], $trigger_event_id );
 		$older    = ! empty( $room['natural_cancel_pending_on_new_message'] ) ? $this->turns->active_older_than( (int) $room['id'], $trigger_event_id ) : array();
 		$canceled = ! empty( $room['natural_cancel_pending_on_new_message'] ) ? $this->turns->cancel_older_triggers( (int) $room['id'], $trigger_event_id ) : 0;
 		foreach ( $older as $turn ) {
@@ -253,17 +242,45 @@ class ConversationTurnService {
 		if ( ! $job_id ) {
 			$this->turns->fail( (int) $turn['id'], 'job_missing' );
 			return new \WP_Error( 'acl_ar_turn_job_missing', __( 'The scheduled agent job is unavailable.', 'acl-agent-rooms' ) );
-		} $result = ( new AgentRuntime() )->run_job( $job_id );
+		} $result = ( new AgentRuntime() )->run_job( $job_id, false, (int) $turn['id'] );
 		$job      = $this->jobs->find( $job_id );
-		if ( is_wp_error( $result ) || ! $job || 'completed' !== $job['status'] ) {
+		if ( ! $job ) {
 			$this->turns->fail( (int) $turn['id'], is_wp_error( $result ) ? $result->get_error_code() : 'job_failed' );
 			return $result;
-		} $message = $this->messages->find( (int) $job['response_message_id'] );
+		}
+		if ( in_array( (string) $job['status'], array( 'pending', 'running' ), true ) ) {
+			$delay = 2;
+			if ( 'running' === (string) $job['status'] && ! empty( $job['lease_expires_at'] ) ) {
+				$delay = max( 2, min( 30, strtotime( (string) $job['lease_expires_at'] . ' UTC' ) - time() ) );
+			}
+			$this->turns->postpone( (int) $turn['id'], $delay );
+			( new QueueService() )->reschedule_turn( $this->turns->find( (int) $turn['id'] ) );
+			return $result;
+		}
+		if ( 'failed' === (string) $job['status'] && ! empty( $job['retryable'] ) && ! empty( $job['next_attempt_at'] ) ) {
+			$this->turns->postpone_until( (int) $turn['id'], (string) $job['next_attempt_at'] );
+			( new QueueService() )->reschedule_turn( $this->turns->find( (int) $turn['id'] ) );
+			return $result;
+		}
+		if ( 'canceled' === (string) $job['status'] ) {
+			$reason = (string) ( $job['error_code'] ?: 'superseded' );
+			$this->turns->cancel( (int) $turn['id'], $reason );
+			return is_wp_error( $result ) ? $result : new \WP_Error( 'acl_ar_turn_canceled', __( 'The scheduled conversation turn is no longer current.', 'acl-agent-rooms' ), array( 'status' => 409 ) );
+		}
+		if ( 'completed' !== (string) $job['status'] ) {
+			$this->turns->fail( (int) $turn['id'], is_wp_error( $result ) ? $result->get_error_code() : 'job_failed' );
+			return $result;
+		}
+		$message = $this->messages->find( (int) $job['response_message_id'] );
 		$event     = $message ? $this->events->find_by_legacy_message_id( (int) $message['id'] ) : null;
 		if ( ! $event ) {
 			$this->turns->fail( (int) $turn['id'], 'event_missing' );
 			return new \WP_Error( 'acl_ar_turn_event_missing', __( 'The agent reply event could not be confirmed.', 'acl-agent-rooms' ) );
-		} $this->turns->publish( (int) $turn['id'], (int) $event['id'] );
+		}
+		$fresh_turn = $this->turns->find( (int) $turn['id'] );
+		if ( 'published' !== (string) ( $fresh_turn['status'] ?? '' ) && ! $this->turns->publish( (int) $turn['id'], (int) $event['id'] ) ) {
+			return new \WP_Error( 'acl_ar_turn_publish_failed', __( 'Conversation turn publication will be recovered.', 'acl-agent-rooms' ) );
+		}
 		return $this->turns->find( (int) $turn['id'] ); }
 
 	private function valid( array $turn, ?array $room = null ): bool {

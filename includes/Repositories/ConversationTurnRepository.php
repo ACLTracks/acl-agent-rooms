@@ -124,14 +124,17 @@ class ConversationTurnRepository {
 		$wpdb->query( $wpdb->prepare( "UPDATE {$this->table()} SET status='publishing',updated_at=%s WHERE id=%d AND due_at<=%s AND (status IN ('pending','typing') OR (status='publishing' AND updated_at<=%s))", $now, $id, $now, $stale ) );
 		return $wpdb->rows_affected > 0; }
 	public function postpone( int $id, int $seconds = 2 ): bool {
+		return $this->postpone_until( $id, gmdate( 'Y-m-d H:i:s', time() + max( 1, min( 30, $seconds ) ) ) ); }
+	public function postpone_until( int $id, string $due_at ): bool {
 		global $wpdb;
-		$due = gmdate( 'Y-m-d H:i:s', time() + max( 1, min( 30, $seconds ) ) );
+		$timestamp = strtotime( $due_at . ' UTC' );
+		$due       = gmdate( 'Y-m-d H:i:s', max( time() + 1, $timestamp ?: 0 ) );
 		return false !== $wpdb->update(
 			$this->table(),
 			array(
 				'status'     => 'pending',
 				'due_at'     => $due,
-				'typing_at'  => Time::mysql_gmt(),
+				'typing_at'  => $due,
 				'updated_at' => Time::mysql_gmt(),
 			),
 			array(
@@ -205,7 +208,7 @@ class ConversationTurnRepository {
 	}
 	public function publish( int $id, int $event_id ): bool {
 		global $wpdb;
-		return false !== $wpdb->update(
+		return 1 === $wpdb->update(
 			$this->table(),
 			array(
 				'status'             => 'published',
@@ -220,7 +223,7 @@ class ConversationTurnRepository {
 		); }
 	public function fail( int $id, string $reason = 'publish_failed' ): bool {
 		global $wpdb;
-		return false !== $wpdb->update(
+		return 1 === $wpdb->update(
 			$this->table(),
 			array(
 				'status'        => 'failed',
@@ -228,7 +231,10 @@ class ConversationTurnRepository {
 				'content'       => null,
 				'updated_at'    => Time::mysql_gmt(),
 			),
-			array( 'id' => $id )
+			array(
+				'id'     => $id,
+				'status' => 'publishing',
+			)
 		); }
 	public function cancel( int $id, string $reason ): bool {
 		global $wpdb;

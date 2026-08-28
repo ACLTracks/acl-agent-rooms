@@ -54,7 +54,13 @@ class JobRetryPolicy {
 			return true;
 		}
 		if ( 'failed' === $status ) {
-			return $intentional || ! empty( $job['retryable'] );
+			if ( $intentional ) {
+				return true;
+			}
+			if ( empty( $job['retryable'] ) ) {
+				return false;
+			}
+			return empty( $job['next_attempt_at'] ) || strtotime( (string) $job['next_attempt_at'] . ' UTC' ) <= time();
 		}
 		if ( 'running' === $status ) {
 			return empty( $job['lease_expires_at'] ) || strtotime( (string) $job['lease_expires_at'] . ' UTC' ) <= time();
